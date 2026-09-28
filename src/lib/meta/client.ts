@@ -83,6 +83,31 @@ export function sumActions(list: unknown, type: string): number {
   }, 0);
 }
 
+/**
+ * Primeiro tipo de action com valor. A Meta repete o MESMO evento sob vários
+ * nomes (agregado, omni, pixel) — somá-los contaria em dobro.
+ */
+export function firstActionCount(list: unknown, types: string[]): number {
+  for (const type of types) {
+    const value = sumActions(list, type);
+    if (value > 0) return value;
+  }
+  return 0;
+}
+
+/** "Finalizações de compra iniciadas" do Gerenciador, em ordem de preferência. */
+export const INITIATE_CHECKOUT_ACTIONS = [
+  "initiate_checkout",
+  "omni_initiated_checkout",
+  "offsite_conversion.fb_pixel_initiate_checkout",
+];
+
+/** "Visualizações da página de destino" do Gerenciador, em ordem de preferência. */
+export const LANDING_PAGE_VIEW_ACTIONS = [
+  "landing_page_view",
+  "omni_landing_page_view",
+];
+
 /** Contas de anúncio da área, com o ads_token já decifrado. SOMENTE no servidor. */
 export async function getAdAccounts(areaId: string): Promise<AdAccount[]> {
   const admin = createAdminClient();

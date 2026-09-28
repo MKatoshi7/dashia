@@ -81,6 +81,11 @@ export default async function CampanhasPage({
     getFunnelBase(activeArea.id, period.from, period.to),
   ]);
 
+  // page_view e initiate_checkout só existem com o snippet opcional de captura
+  // própria. Sem ele, `events_log` fica vazio para sempre — mostrar as etapas
+  // zeradas faria o funil parecer quebrado. Só entram quando há dado real.
+  const hasOwnEvents = funnelBase.views > 0 || funnelBase.checkouts > 0;
+
   // Monta as linhas conforme o MODO DE ATRIBUIÇÃO (nunca somando os dois).
   let rows: TableRow[] = meta.rows.map((entity) => {
     const own = entity.adIds.reduce(
@@ -117,10 +122,13 @@ export default async function CampanhasPage({
       spend: entity.spend,
       impressions: entity.impressions,
       clicks: entity.clicks,
+      landingViews: entity.metaLandingViews,
       sales,
       revenue,
-      // Checkouts vêm SEMPRE dos eventos próprios (a Meta não os reporta assim).
-      checkouts: own.checkouts,
+      // Com o snippet ligado, checkouts vêm dos eventos próprios. Sem ele
+      // (caminho padrão), `events_log` fica vazio para sempre — então usamos as
+      // "Finalizações de compra iniciadas" que o pixel reportou à Meta.
+      checkouts: hasOwnEvents ? own.checkouts : entity.metaCheckouts,
       profit,
       roas: entity.spend > 0 ? revenue / entity.spend : 0,
       cpa: sales > 0 ? entity.spend / sales : 0,
@@ -139,10 +147,14 @@ export default async function CampanhasPage({
     const needle = params.q.toLowerCase();
     rows = rows.filter((r) => r.name.toLowerCase().includes(needle));
   }
+  // Mesmo critério do StatusDot (status EFETIVO): um anúncio ACTIVE dentro de
+  // uma campanha pausada não está veiculando, então não conta como ativo.
+  const isRunning = (r: TableRow) =>
+    (r.effectiveStatus || r.status).toUpperCase() === "ACTIVE";
   if (params.status === "active") {
-    rows = rows.filter((r) => r.status.toUpperCase() === "ACTIVE");
+    rows = rows.filter(isRunning);
   } else if (params.status === "paused") {
-    rows = rows.filter((r) => r.status.toUpperCase() !== "ACTIVE");
+    rows = rows.filter((r) => !isRunning(r));
   }
 
   // Top 5 anúncios por faturamento Last Click (independe do modo da tabela).
@@ -164,12 +176,15 @@ export default async function CampanhasPage({
   const totalImpressions = rows.reduce((sum, r) => sum + r.impressions, 0);
   const totalClicks = rows.reduce((sum, r) => sum + r.clicks, 0);
   const totalSales = rows.reduce((sum, r) => sum + r.sales, 0);
+  // Visitas e checkouts: eventos próprios quando o snippet está ligado; senão,
+  // o que o pixel reportou à Meta, somado do MESMO conjunto filtrado.
+  const totalViews = hasOwnEvents
+    ? funnelBase.views
+    : rows.reduce((sum, r) => sum + r.landingViews, 0);
+  const totalCheckouts = hasOwnEvents
+    ? funnelBase.checkouts
+    : rows.reduce((sum, r) => sum + r.checkouts, 0);
   const totalRevenue = rows.reduce((sum, r) => sum + r.revenue, 0);
-
-  // page_view e initiate_checkout só existem com o snippet opcional de captura
-  // própria. Sem ele, `events_log` fica vazio para sempre — mostrar as etapas
-  // zeradas faria o funil parecer quebrado. Só entram quando há dado real.
-  const hasOwnEvents = funnelBase.views > 0 || funnelBase.checkouts > 0;
 
   return (
     <div className="space-y-4">
@@ -322,22 +337,18 @@ export default async function CampanhasPage({
                 previous={totalImpressions}
                 base={totalImpressions}
               />
-              {hasOwnEvents ? (
-                <>
-                  <FunnelStep
-                    label="Views (page_view)"
-                    value={funnelBase.views}
-                    previous={totalClicks}
-                    base={totalImpressions}
-                  />
-                  <FunnelStep
-                    label="Checkouts iniciados"
-                    value={funnelBase.checkouts}
-                    previous={funnelBase.views}
-                    base={totalImpressions}
-                  />
-                </>
-              ) : null}
+              <FunnelStep
+                label="Visitas à página"
+                value={totalViews}
+                previous={totalClicks}
+                base={totalImpressions}
+              />
+              <FunnelStep
+                label="Finalização de compra iniciada"
+                value={totalCheckouts}
+                previous={totalViews}
+                base={totalImpressions}
+              />
               <FunnelStep
                 label={
                   attribution === "meta"
@@ -345,7 +356,7 @@ export default async function CampanhasPage({
                     : "Vendas aprovadas (Last Click)"
                 }
                 value={totalSales}
-                previous={hasOwnEvents ? funnelBase.checkouts : totalClicks}
+                previous={totalCheckouts}
                 base={totalImpressions}
               />
 
@@ -374,9 +385,8 @@ export default async function CampanhasPage({
                 </p>
                 {!hasOwnEvents ? (
                   <p className="pt-1">
-                    Views e checkouts iniciados dependem do snippet de captura
-                    própria, que é opcional e não está em uso. A atribuição por
-                    anúncio não precisa dele.
+                    Visitas à página e finalizações de compra vêm do pixel,
+                    como a Meta reporta. As vendas vêm do checkout.
                   </p>
                 ) : null}
               </div>

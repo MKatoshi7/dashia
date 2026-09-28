@@ -4,7 +4,10 @@ import { rateLimit } from "@/lib/rate-limit";
 
 import {
   cacheSecondsFor,
+  firstActionCount,
   getAdAccounts,
+  INITIATE_CHECKOUT_ACTIONS,
+  LANDING_PAGE_VIEW_ACTIONS,
   normalizeAccountId,
   sumActions,
   toYmd,
@@ -37,6 +40,10 @@ export type MetaEntity = {
   clicks: number;
   metaPurchases: number;
   metaRevenue: number;
+  /** "Finalizações de compra iniciadas" que o pixel reportou à Meta. */
+  metaCheckouts: number;
+  /** "Visualizações da página de destino" que o pixel reportou à Meta. */
+  metaLandingViews: number;
   /** ad_ids que compõem a linha — base da atribuição Last Click. */
   adIds: string[];
 };
@@ -203,6 +210,8 @@ export async function getMetaEntities(
         clicks: 0,
         metaPurchases: 0,
         metaRevenue: 0,
+        metaCheckouts: 0,
+        metaLandingViews: 0,
         adIds: [] as string[],
       };
 
@@ -211,6 +220,14 @@ export async function getMetaEntities(
       entry.clicks += Number(row.clicks) || 0;
       entry.metaPurchases += sumActions(row.actions, "purchase");
       entry.metaRevenue += sumActions(row.action_values, "purchase");
+      entry.metaCheckouts += firstActionCount(
+        row.actions,
+        INITIATE_CHECKOUT_ACTIONS,
+      );
+      entry.metaLandingViews += firstActionCount(
+        row.actions,
+        LANDING_PAGE_VIEW_ACTIONS,
+      );
 
       const adId = row.ad_id;
       if (typeof adId === "string" && !entry.adIds.includes(adId)) {
@@ -231,6 +248,8 @@ export async function getMetaEntities(
         clicks: 0,
         metaPurchases: 0,
         metaRevenue: 0,
+        metaCheckouts: 0,
+        metaLandingViews: 0,
         adIds: level === "ad" ? [id] : [],
       };
 

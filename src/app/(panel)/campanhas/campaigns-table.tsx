@@ -40,6 +40,7 @@ export type TableRow = {
   spend: number;
   impressions: number;
   clicks: number;
+  landingViews: number;
   sales: number;
   revenue: number;
   checkouts: number;
@@ -65,6 +66,8 @@ type SortKey = keyof Pick<
   | "cpm"
   | "ctr"
   | "cpc"
+  | "landingViews"
+  | "clicks"
 >;
 
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
@@ -80,6 +83,8 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "cpm", label: "CPM", numeric: true },
   { key: "ctr", label: "CTR", numeric: true },
   { key: "cpc", label: "CPC", numeric: true },
+  { key: "landingViews", label: "Visitas no site", numeric: true },
+  { key: "clicks", label: "Cliques", numeric: true },
 ];
 
 const PAGE_SIZE = 25;
@@ -127,6 +132,7 @@ export function CampaignsTable({
         checkouts: acc.checkouts + r.checkouts,
         impressions: acc.impressions + r.impressions,
         clicks: acc.clicks + r.clicks,
+        landingViews: acc.landingViews + r.landingViews,
       }),
       {
         spend: 0,
@@ -136,6 +142,7 @@ export function CampaignsTable({
         checkouts: 0,
         impressions: 0,
         clicks: 0,
+        landingViews: 0,
       },
     );
     return {
@@ -248,6 +255,8 @@ export function CampaignsTable({
                 <Num className="sensitive">{formatCurrency(row.cpm, currency)}</Num>
                 <Num>{formatPercent(row.ctr, 2)}</Num>
                 <Num className="sensitive">{formatCurrency(row.cpc, currency)}</Num>
+                <Num>{formatNumber(row.landingViews)}</Num>
+                <Num>{formatNumber(row.clicks)}</Num>
 
                 {canEdit ? (
                   <td className="px-3 py-2">
@@ -278,6 +287,8 @@ export function CampaignsTable({
               <Num className="sensitive">{formatCurrency(totals.cpm, currency)}</Num>
               <Num>{formatPercent(totals.ctr, 2)}</Num>
               <Num className="sensitive">{formatCurrency(totals.cpc, currency)}</Num>
+              <Num>{formatNumber(totals.landingViews)}</Num>
+              <Num>{formatNumber(totals.clicks)}</Num>
               {canEdit ? <td /> : null}
             </tr>
           </tfoot>
