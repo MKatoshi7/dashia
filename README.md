@@ -1,4 +1,4 @@
-# Painel de Tracking e Atribuição (White Label)
+# DashIA — Painel de Tracking e Atribuição
 
 Painel **single-tenant** de leitura e análise de tracking e atribuição de anúncios.
 Coleta visitas, eventos e compras (webhooks de 7 plataformas de checkout) e lê
