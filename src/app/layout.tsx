@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Oswald, Plus_Jakarta_Sans } from "next/font/google";
 
 import { getBranding } from "@/lib/branding";
+import { THEME_IDS, THEME_STORAGE_KEY } from "@/lib/themes";
 
 import "./globals.css";
 
@@ -41,11 +42,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
 /**
  * Aplica o tema salvo antes da primeira pintura (evita flash).
- * O padrão é escuro; o toggle grava "light"/"dark" no localStorage.
+ * O padrão é escuro; o seletor de tema grava o id no localStorage.
  */
 const themeScript = `
-(function(){try{var t=localStorage.getItem('theme');
-if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();
+(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');
+if(${JSON.stringify(THEME_IDS)}.indexOf(t)>=0){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();
 `;
 
 export default async function RootLayout({

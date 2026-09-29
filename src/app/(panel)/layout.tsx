@@ -26,18 +26,21 @@ export default async function PanelLayout({
     getActiveArea(),
   ]);
 
-  const settings = activeArea ? await getSettings(activeArea.id) : null;
+  // A barra de meta é MENSAL — independe do período selecionado no header.
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  // Em paralelo: antes eram duas idas ao banco em sequência.
+  const [settings, revenue] = activeArea
+    ? await Promise.all([
+        getSettings(activeArea.id),
+        getRevenueTotal(activeArea.id, monthStart, now),
+      ])
+    : [null, 0];
   const currency = settings?.currency ?? DEFAULT_SETTINGS.currency;
 
   // A meta operacional vem das settings da área; cai no valor da própria área.
   const goal = settings?.revenue_goal ?? activeArea?.revenue_goal ?? 0;
-
-  // A barra de meta é MENSAL — independe do período selecionado no header.
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const revenue = activeArea
-    ? await getRevenueTotal(activeArea.id, monthStart, now)
-    : 0;
 
   const sidebarProps = {
     branding,

@@ -81,11 +81,9 @@ export default async function CampanhasPage({
     );
   }
 
-  const settings = await getSettings(activeArea.id);
-  const currency = settings?.currency ?? DEFAULT_SETTINGS.currency;
-  const taxRate = Number(settings?.tax_rate ?? DEFAULT_SETTINGS.tax_rate);
-
-  const [meta, lastClick, accounts, funnelBase] = await Promise.all([
+  // Tudo em paralelo (as settings eram lidas antes, sozinhas).
+  const [settings, meta, lastClick, accounts, funnelBase] = await Promise.all([
+    getSettings(activeArea.id),
     getMetaEntities(
       activeArea.id,
       level,
@@ -97,6 +95,8 @@ export default async function CampanhasPage({
     getAccountOptions(activeArea.id),
     getFunnelBase(activeArea.id, period.from, period.to),
   ]);
+  const currency = settings?.currency ?? DEFAULT_SETTINGS.currency;
+  const taxRate = Number(settings?.tax_rate ?? DEFAULT_SETTINGS.tax_rate);
 
   // page_view e initiate_checkout só existem com o snippet opcional de captura
   // própria. Sem ele, `events_log` fica vazio para sempre — mostrar as etapas
@@ -296,6 +296,7 @@ export default async function CampanhasPage({
           rows={rows}
           currency={currency}
           canEdit={meta.configured}
+          columnOrder={settings?.campaign_columns ?? DEFAULT_SETTINGS.campaign_columns}
         />
       </Card>
 

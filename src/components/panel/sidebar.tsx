@@ -3,18 +3,19 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { LogOut, Menu, X } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { signOut } from "@/app/(panel)/actions";
 import { Brand } from "@/components/brand";
 import type { Area } from "@/lib/areas";
 import type { Branding } from "@/lib/branding";
+import { PERIOD_PARAMS } from "@/lib/period";
 import { cn } from "@/lib/utils";
 
 import { AreaSwitcher } from "./area-switcher";
 import { NAV_ITEMS, NAV_SECTIONS } from "./nav";
-import { ThemeToggle } from "./theme-toggle";
+import { ThemeMenu } from "./theme-picker";
 
 type SidebarProps = {
   branding: Branding;
@@ -83,6 +84,16 @@ function SidebarContent({
   onNavigate,
 }: SidebarProps & { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Os links já levam o período atual: sem isso o proxy redirecionava cada
+  // troca de tela para reaplicar o período — uma viagem a mais por clique.
+  const periodQuery = new URLSearchParams();
+  for (const key of PERIOD_PARAMS) {
+    const value = searchParams.get(key);
+    if (value) periodQuery.set(key, value);
+  }
+  const suffix = periodQuery.size > 0 ? `?${periodQuery.toString()}` : "";
 
   return (
     <div className="flex h-full flex-col gap-5 p-4">
@@ -104,7 +115,7 @@ function SidebarContent({
                 {items.map((item) => (
                   <NavTile
                     key={item.href}
-                    href={item.href}
+                    href={`${item.href}${suffix}`}
                     label={item.label}
                     icon={item.icon}
                     active={
@@ -130,7 +141,7 @@ function SidebarContent({
           >
             {userEmail}
           </span>
-          <ThemeToggle />
+          <ThemeMenu />
         </div>
 
         <form action={signOut}>

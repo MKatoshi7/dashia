@@ -30,7 +30,14 @@ Um **painel de LEITURA e análise** de tracking e atribuição de anúncios. O s
   reproduzível em qualquer projeto Supabase novo. Alternativa sem CLI:
   `supabase/setup.sql` (dump das migrations na ordem, para colar no SQL Editor) +
   `supabase/validacao.sql` (confere o resultado). **Ao criar uma migration nova,
-  regenere o `setup.sql`.** Seed **opcional** (script separado, nunca automático).
+  rode `node scripts/build-setup-sql.mjs`** (gera o `setup.sql`; `--check` só
+  confere). Nunca edite o `setup.sql` à mão nem o monte com `String.replace`: um
+  `$'` dentro do SQL vira padrão especial do replace e corrompe o arquivo — já
+  aconteceu. Seed **opcional** (script separado, nunca automático).
+- **Região da Vercel = `gru1`** (`vercel.json`), perto do Supabase em São Paulo.
+  Cada troca de tela faz várias consultas ao banco; com a função nos EUA cada
+  uma custava ~120 ms a mais. Quem hospedar o Supabase em outra região deve
+  trocar este valor.
 
 ## Stack e versões (estáveis; docs conferidas em 2026-07)
 

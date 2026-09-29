@@ -14,17 +14,17 @@ import {
 import { formatCurrency } from "@/lib/format";
 import type { DailyPoint } from "@/lib/metrics";
 
+import { useThemeColors } from "./use-theme-colors";
+
 /**
  * Faturamento (dados próprios) vs Gasto com Ads (Meta).
  * Ciano para faturamento, roxo para gasto — o par de acentos da referência,
  * distinguíveis também por posição na legenda.
  *
- * As cores saem das variáveis CSS em vez de valores fixos: assim o gráfico
- * acompanha o tema claro/escuro E o override de cor do branding da instância,
- * sem nada de marca preso no código.
+ * As cores saem das variáveis CSS (useThemeColors), já resolvidas: acompanham
+ * o tema e o override de cor do branding, e não viram preto no Safari (que não
+ * resolve var() em atributo SVG).
  */
-const COLOR_REVENUE = "hsl(var(--primary))";
-const COLOR_SPEND = "hsl(var(--accent-purple))";
 
 function shortDate(value: string): string {
   const [, month, day] = value.split("-");
@@ -38,6 +38,11 @@ export function RevenueChart({
   data: DailyPoint[];
   currency: string;
 }) {
+  const color = useThemeColors();
+  const COLOR_REVENUE = color("primary");
+  const COLOR_SPEND = color("accent-purple");
+  const axisTick = { fontSize: 11, fill: color("muted-foreground") };
+
   return (
     <div className="h-72 w-full p-3">
       <ResponsiveContainer width="100%" height="100%">
@@ -55,8 +60,7 @@ export function RevenueChart({
 
           <CartesianGrid
             strokeDasharray="3 3"
-            stroke="currentColor"
-            className="text-muted-foreground/15"
+            stroke={color("muted-foreground", 0.15)}
             vertical={false}
           />
           <XAxis
@@ -65,15 +69,13 @@ export function RevenueChart({
             tickLine={false}
             axisLine={false}
             minTickGap={24}
-            tick={{ fontSize: 11, fill: "currentColor" }}
-            className="text-muted-foreground"
+            tick={axisTick}
           />
           <YAxis
             tickLine={false}
             axisLine={false}
             width={64}
-            tick={{ fontSize: 11, fill: "currentColor" }}
-            className="text-muted-foreground"
+            tick={axisTick}
             tickFormatter={(value: number) =>
               new Intl.NumberFormat("pt-BR", {
                 notation: "compact",
@@ -82,7 +84,7 @@ export function RevenueChart({
             }
           />
           <Tooltip
-            cursor={{ stroke: "hsl(var(--foreground) / 0.15)" }}
+            cursor={{ stroke: color("foreground", 0.15) }}
             contentStyle={{
               background: "hsl(var(--card))",
               border: "1px solid hsl(var(--border))",

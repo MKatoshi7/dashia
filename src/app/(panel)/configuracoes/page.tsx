@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { SettingsForm } from "@/app/(panel)/integracoes/integration-forms";
+import { ThemeGrid } from "@/components/panel/theme-picker";
 import { Card } from "@/components/ui/card";
 import { getActiveArea, getAreas } from "@/lib/areas";
 import { getBranding } from "@/lib/branding";
@@ -46,6 +47,20 @@ export default async function ConfiguracoesPage() {
               Nenhuma área ainda. Use “Nova área” no topo da sidebar.
             </div>
           )}
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Tema</h2>
+          <p className="text-sm text-muted-foreground">
+            Cores do painel neste navegador. Também dá para trocar pelo ícone
+            de paleta no rodapé do menu.
+          </p>
+        </div>
+
+        <Card>
+          <ThemeGrid />
         </Card>
       </div>
 

@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { getActiveArea } from "@/lib/areas";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  DEFAULT_CAMPAIGN_COLUMNS,
+  isCampaignColumn,
+} from "@/lib/campaign-columns";
 import { updateEntityBudget, updateEntityStatus } from "@/lib/meta/write";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -122,4 +126,36 @@ export async function setEntityBudget(
 
   revalidatePath("/campanhas");
   return { ok: true };
+}
+
+/* ------------------------------------------------ ordem das colunas */
+
+export type ColumnsState = { error?: string; ok?: string };
+
+/** Ordem das colunas da tabela (campo `columns` repetido, na ordem). */
+export async function saveCampaignColumns(
+  _prev: ColumnsState,
+  formData: FormData,
+): Promise<ColumnsState> {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Não autenticado." };
+  const area = await getActiveArea();
+  if (!area) return { error: "Nenhuma área ativa." };
+
+  const raw = formData.getAll("columns").map(String);
+  const columns = [...new Set(raw.filter(isCampaignColumn))];
+  if (columns.length !== raw.length || columns.length !== DEFAULT_CAMPAIGN_COLUMNS.length) {
+    return { error: "Lista de colunas inválida." };
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("settings")
+    .update({ campaign_columns: columns })
+    .eq("area_id", area.id);
+
+  if (error) return { error: `Falha ao salvar: ${error.message}` };
+
+  revalidatePath("/campanhas");
+  return { ok: "Ordem salva." };
 }

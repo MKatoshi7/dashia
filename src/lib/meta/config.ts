@@ -31,3 +31,9 @@ export const META_CACHE = {
   /** A partir de quantos dias atrás um período é considerado "fechado". */
   recentWindowDays: 3,
 };
+
+/**
+ * Tag de cache de TODA leitura da Meta. O botão "Atualizar" do header chama
+ * `updateTag(META_CACHE_TAG)` para forçar dados frescos na hora.
+ */
+export const META_CACHE_TAG = "meta";

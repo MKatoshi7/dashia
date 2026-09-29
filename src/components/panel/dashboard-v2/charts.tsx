@@ -18,48 +18,37 @@ import {
 
 import { formatCurrency, formatNumber } from "@/lib/format";
 
+import { useThemeColors } from "../use-theme-colors";
+
 /**
- * Gráficos do Dashboard V2. Cores sempre das variáveis CSS (tema + branding),
- * nunca fixas — mesmo padrão do RevenueChart.
+ * Gráficos do Dashboard V2. Cores do tema RESOLVIDAS (useThemeColors) — nunca
+ * `hsl(var(--x))` em atributo SVG, que o Safari do iPhone pinta de preto (era
+ * o destaque preto ao tocar numa hora do gráfico de horário).
  */
-const COLORS = {
-  primary: "hsl(var(--primary))",
-  purple: "hsl(var(--accent-purple))",
-  cyan: "hsl(var(--accent-cyan))",
-  amber: "hsl(var(--accent-amber))",
-  emerald: "hsl(var(--accent-emerald))",
-  destructive: "hsl(var(--destructive))",
-};
+function useChartTheme() {
+  const color = useThemeColors();
 
-const tooltipProps = {
-  cursor: { fill: "hsl(var(--foreground) / 0.05)", stroke: "hsl(var(--foreground) / 0.15)" },
-  contentStyle: {
-    background: "hsl(var(--card))",
-    border: "1px solid hsl(var(--border))",
-    borderRadius: "0.75rem",
-    fontSize: "0.78rem",
-    boxShadow: "0 20px 40px -12px rgb(0 0 0 / 0.6)",
-  },
-  labelStyle: { color: "hsl(var(--muted-foreground))" },
-  itemStyle: { color: "hsl(var(--foreground))" },
-} as const;
-
-const axisProps = {
-  tickLine: false,
-  axisLine: false,
-  tick: { fontSize: 11, fill: "currentColor" },
-  className: "text-muted-foreground",
-} as const;
-
-function Grid() {
-  return (
-    <CartesianGrid
-      strokeDasharray="3 3"
-      stroke="currentColor"
-      className="text-muted-foreground/15"
-      vertical={false}
-    />
-  );
+  return {
+    color,
+    tooltip: {
+      cursor: { fill: color("foreground", 0.06), stroke: color("foreground", 0.15) },
+      contentStyle: {
+        background: color("card"),
+        border: `1px solid ${color("border")}`,
+        borderRadius: "0.75rem",
+        fontSize: "0.78rem",
+        boxShadow: "0 20px 40px -12px rgb(0 0 0 / 0.6)",
+      },
+      labelStyle: { color: color("muted-foreground") },
+      itemStyle: { color: color("foreground") },
+    },
+    axis: {
+      tickLine: false,
+      axisLine: false,
+      tick: { fontSize: 11, fill: color("muted-foreground") },
+    },
+    grid: color("muted-foreground", 0.15),
+  } as const;
 }
 
 function hourLabel(hour: number): string {
@@ -69,10 +58,10 @@ function hourLabel(hour: number): string {
 /* ------------------------------------------------------------ pagamento */
 
 const PAYMENT_SLICES = [
-  { key: "pix", label: "Pix", color: COLORS.primary },
-  { key: "cartao", label: "Cartão", color: COLORS.cyan },
-  { key: "boleto", label: "Boleto", color: COLORS.amber },
-  { key: "outros", label: "Outros", color: COLORS.destructive },
+  { key: "pix", label: "Pix", token: "primary" },
+  { key: "cartao", label: "Cartão", token: "accent-cyan" },
+  { key: "boleto", label: "Boleto", token: "accent-amber" },
+  { key: "outros", label: "Outros", token: "destructive" },
 ] as const;
 
 export function PaymentDonut({
@@ -80,8 +69,14 @@ export function PaymentDonut({
 }: {
   counts: Record<(typeof PAYMENT_SLICES)[number]["key"], number>;
 }) {
+  const { color, tooltip } = useChartTheme();
   const total = PAYMENT_SLICES.reduce((sum, s) => sum + counts[s.key], 0);
-  const data = PAYMENT_SLICES.map((s) => ({ ...s, value: counts[s.key] }));
+  const data = PAYMENT_SLICES.map((s) => ({
+    label: s.label,
+    value: counts[s.key],
+    color: color(s.token),
+  }));
+  const slices = total > 0 ? data : [{ label: "vazio", value: 1, color: color("muted") }];
 
   return (
     <div className="flex h-72 flex-col px-5 pb-4">
@@ -89,7 +84,7 @@ export function PaymentDonut({
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Pie
-              data={total > 0 ? data : [{ label: "vazio", value: 1, color: "hsl(var(--muted))" }]}
+              data={slices}
               dataKey="value"
               nameKey="label"
               innerRadius="62%"
@@ -97,13 +92,13 @@ export function PaymentDonut({
               stroke="none"
               isAnimationActive={false}
             >
-              {(total > 0 ? data : [{ color: "hsl(var(--muted))" }]).map((slice, i) => (
-                <Cell key={i} fill={slice.color} />
+              {slices.map((slice) => (
+                <Cell key={slice.label} fill={slice.color} />
               ))}
             </Pie>
             {total > 0 ? (
               <Tooltip
-                {...tooltipProps}
+                {...tooltip}
                 formatter={(value, name) => [formatNumber(Number(value) || 0), String(name ?? "")]}
               />
             ) : null}
@@ -115,8 +110,8 @@ export function PaymentDonut({
         </div>
       </div>
       <div className="flex flex-wrap justify-center gap-4 text-xs text-muted-foreground">
-        {PAYMENT_SLICES.map((s) => (
-          <span key={s.key} className="flex items-center gap-1.5">
+        {data.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5">
             <span className="size-2 rounded-full" style={{ background: s.color }} />
             {s.label}
           </span>
@@ -143,18 +138,27 @@ export function HourChart({ sales }: { sales: number[] }) {
 }
 
 function SalesBars({ data }: { data: { label: string; sales: number }[] }) {
+  const { color, tooltip, axis, grid } = useChartTheme();
+
   return (
     <div className="h-56 w-full px-3 pb-3 pt-2">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: -24 }}>
-          <Grid />
-          <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={8} />
-          <YAxis {...axisProps} allowDecimals={false} width={48} />
+          <CartesianGrid strokeDasharray="3 3" stroke={grid} vertical={false} />
+          <XAxis dataKey="label" {...axis} interval="preserveStartEnd" minTickGap={8} />
+          <YAxis {...axis} allowDecimals={false} width={48} />
           <Tooltip
-            {...tooltipProps}
+            {...tooltip}
             formatter={(value) => [formatNumber(Number(value) || 0), "Vendas"]}
           />
-          <Bar dataKey="sales" name="Vendas" fill={COLORS.primary} radius={[4, 4, 0, 0]} maxBarSize={40} />
+          <Bar
+            dataKey="sales"
+            name="Vendas"
+            fill={color("primary")}
+            activeBar={{ fill: color("primary", 0.8) }}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={40}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -170,6 +174,12 @@ export type CumulativePoint = {
   profit: number;
 };
 
+const CUMULATIVE_SERIES = [
+  { key: "spend", name: "Investimento", token: "accent-amber" },
+  { key: "revenue", name: "Faturamento", token: "primary" },
+  { key: "profit", name: "Lucro", token: "accent-emerald" },
+] as const;
+
 export function CumulativeChart({
   data,
   currency,
@@ -177,6 +187,7 @@ export function CumulativeChart({
   data: CumulativePoint[];
   currency: string;
 }) {
+  const { color, tooltip, axis, grid } = useChartTheme();
   const rows = data.map((p) => ({ ...p, label: hourLabel(p.hour) }));
 
   return (
@@ -184,31 +195,43 @@ export function CumulativeChart({
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
           <defs>
-            {(["amber", "primary", "emerald"] as const).map((key) => (
-              <linearGradient key={key} id={`cum-${key}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={COLORS[key]} stopOpacity={0.3} />
-                <stop offset="100%" stopColor={COLORS[key]} stopOpacity={0} />
+            {CUMULATIVE_SERIES.map((s) => (
+              <linearGradient key={s.key} id={`cum-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={color(s.token)} stopOpacity={0.3} />
+                <stop offset="100%" stopColor={color(s.token)} stopOpacity={0} />
               </linearGradient>
             ))}
           </defs>
-          <Grid />
-          <XAxis dataKey="label" {...axisProps} minTickGap={16} />
+          <CartesianGrid strokeDasharray="3 3" stroke={grid} vertical={false} />
+          <XAxis dataKey="label" {...axis} minTickGap={16} />
           <YAxis
-            {...axisProps}
+            {...axis}
             width={72}
             tickFormatter={(value: number) => formatCurrency(value, currency)}
           />
           <Tooltip
-            {...tooltipProps}
+            {...tooltip}
             formatter={(value, name) => [
               formatCurrency(Number(value) || 0, currency),
               String(name ?? ""),
             ]}
           />
-          <Legend wrapperStyle={{ fontSize: "0.72rem", paddingTop: 8 }} iconType="circle" verticalAlign="top" />
-          <Area type="monotone" dataKey="spend" name="Investimento" stroke={COLORS.amber} strokeWidth={2} fill="url(#cum-amber)" />
-          <Area type="monotone" dataKey="revenue" name="Faturamento" stroke={COLORS.primary} strokeWidth={2} fill="url(#cum-primary)" />
-          <Area type="monotone" dataKey="profit" name="Lucro" stroke={COLORS.emerald} strokeWidth={2} fill="url(#cum-emerald)" />
+          <Legend
+            wrapperStyle={{ fontSize: "0.72rem", paddingTop: 8, color: color("muted-foreground") }}
+            iconType="circle"
+            verticalAlign="top"
+          />
+          {CUMULATIVE_SERIES.map((s) => (
+            <Area
+              key={s.key}
+              type="monotone"
+              dataKey={s.key}
+              name={s.name}
+              stroke={color(s.token)}
+              strokeWidth={2}
+              fill={`url(#cum-${s.key})`}
+            />
+          ))}
         </AreaChart>
       </ResponsiveContainer>
     </div>

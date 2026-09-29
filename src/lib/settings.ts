@@ -2,6 +2,11 @@ import "server-only";
 
 import { cache } from "react";
 
+import {
+  DEFAULT_CAMPAIGN_COLUMNS,
+  normalizeCampaignColumns,
+  type CampaignColumn,
+} from "@/lib/campaign-columns";
 import { DEFAULT_FUNNEL, normalizeFunnel, type FunnelMetric } from "@/lib/funnel";
 import { createClient } from "@/lib/supabase/server";
 
@@ -22,6 +27,8 @@ export type Settings = {
   meta_tax_rate: number;
   /** Métricas das etapas do funil do Dashboard V2, na ordem. */
   dashboard_funnel: FunnelMetric[];
+  /** Ordem das colunas de métricas da tabela de Campanhas. */
+  campaign_columns: CampaignColumn[];
 };
 
 export const DEFAULT_SETTINGS: Omit<Settings, "area_id"> = {
@@ -32,6 +39,7 @@ export const DEFAULT_SETTINGS: Omit<Settings, "area_id"> = {
   dashboard_version: "legacy",
   meta_tax_rate: 12.15,
   dashboard_funnel: DEFAULT_FUNNEL,
+  campaign_columns: DEFAULT_CAMPAIGN_COLUMNS,
 };
 
 export const getSettings = cache(
@@ -58,6 +66,7 @@ export const getSettings = cache(
         dashboard_version: row.dashboard_version === "v2" ? "v2" : "legacy",
         meta_tax_rate: Number(row.meta_tax_rate ?? DEFAULT_SETTINGS.meta_tax_rate),
         dashboard_funnel: normalizeFunnel(row.dashboard_funnel),
+        campaign_columns: normalizeCampaignColumns(row.campaign_columns),
       };
     } catch {
       return null;

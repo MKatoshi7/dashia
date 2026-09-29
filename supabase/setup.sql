@@ -6,8 +6,8 @@
 -- funções, tabelas, RLS, rate limit, captura, realtime e checkout.
 --
 -- Rode UMA VEZ SÓ, num projeto Supabase novo e vazio.
--- Gerado a partir de supabase/migrations/ (ordem preservada). Mantenha em
--- sincronia: ao criar uma migration nova, regenere este arquivo.
+-- Gerado a partir de supabase/migrations/ (ordem preservada) por
+-- scripts/build-setup-sql.mjs — NÃO edite à mão; rode o script.
 -- =====================================================================
 
 begin;
@@ -426,14 +426,9 @@ create policy "authenticated read" on public.audit_log
 -- Grants explícitos (reprodutíveis em qualquer projeto Supabase novo).
 -- authenticated: apenas SELECT (a escrita é bloqueada por falta de policy).
 -- service_role: acesso total (e bypass de RLS).
---
 -- ATENÇÃO: os DEFAULT PRIVILEGES do Supabase concedem privilégios de TABELA a
--- anon/authenticated automaticamente. Ou seja, `anon` PODE ter INSERT/UPDATE/
--- DELETE aqui — quem efetivamente bloqueia é a RLS (habilitada em todas as
--- tabelas, com policy só de SELECT). Verificado num projeto real: um INSERT com
--- a chave anon responde "new row violates row-level security policy", e não
--- "permission denied for table" — prova de que o grant existe e a RLS é a
--- barreira. Não confie apenas nestes grants.
+-- anon/authenticated automaticamente. Quem efetivamente bloqueia a escrita é a
+-- RLS, não a ausência de grant. Ver 20260725120000_function_grants_lockdown.sql.
 -- ---------------------------------------------------------------------------
 grant usage on schema public to anon, authenticated, service_role;
 
@@ -703,9 +698,9 @@ grant all on public.checkout_integrations to service_role;
 --
 -- CAUSA DO FURO: projetos Supabase trazem DEFAULT PRIVILEGES que concedem
 -- EXECUTE em funções novas do schema `public` aos papéis `anon` e
--- `authenticated` EXPLICITAMENTE, por nome. As seções acima fazem apenas
--- `revoke all on function ... from public`, que remove o grant do pseudo-papel
--- PUBLIC — os grants explícitos a anon/authenticated sobrevivem.
+-- `authenticated` EXPLICITAMENTE, por nome. As migrations anteriores fizeram
+-- apenas `revoke all on function ... from public`, que remove o grant do
+-- pseudo-papel PUBLIC — os grants explícitos a anon/authenticated sobrevivem.
 --
 -- VERIFICADO contra um projeto real (2026-07-25): com a chave anon era possível
 -- executar app_encrypt, app_decrypt, rate_limit_hit, identify_visitor e
@@ -811,30 +806,7 @@ alter table public.meta_ad_accounts
   drop constraint if exists meta_ad_accounts_currency_check;
 alter table public.meta_ad_accounts
   add constraint meta_ad_accounts_currency_check
-    check (currency is null or currency ~ '^[A-Z]{3} faz um futuro `supabase db push` saber que
--- estas já foram aplicadas, evitando reaplicar tudo por cima.
--- ---------------------------------------------------------------------
-create schema if not exists supabase_migrations;
-create table if not exists supabase_migrations.schema_migrations (
-  version text primary key,
-  statements text[],
-  name text
-);
-insert into supabase_migrations.schema_migrations (version, name) values
-  ('20260721120000', 'extensions_and_functions'),
-  ('20260721120100', 'tables'),
-  ('20260721120200', 'rate_limit'),
-  ('20260721120300', 'rls'),
-  ('20260722120000', 'capture'),
-  ('20260722130000', 'realtime'),
-  ('20260722140000', 'checkout_platforms'),
-  ('20260725120000', 'function_grants_lockdown'),
-  ('20260929120000', 'dashboard_prefs'),
-  ('20260930120000', 'account_currency_funnel')
-on conflict (version) do nothing;
-
-commit;
-);
+    check (currency is null or currency ~ '^[A-Z]{3}$');
 
 alter table public.meta_ad_accounts
   drop constraint if exists meta_ad_accounts_fx_rate_check;
@@ -845,6 +817,22 @@ alter table public.meta_ad_accounts
 alter table public.settings
   add column if not exists dashboard_funnel text[] not null
     default '{link_clicks,landing_views,checkouts,payment_info,purchases}';
+
+-- ---------------------------------------------------------------------
+-- 20261001120000_campaign_columns.sql
+-- ---------------------------------------------------------------------
+-- =============================================================================
+-- Ordem das colunas da tabela de Campanhas (por área)
+-- =============================================================================
+-- settings.campaign_columns: chaves das métricas na ordem escolhida. NULL =
+--   ordem padrão. Chaves válidas vivem em src/lib/campaign-columns.ts; colunas
+--   ausentes da lista são acrescentadas no fim pela aplicação.
+--
+-- Idempotente: pode rodar de novo sem erro.
+-- =============================================================================
+
+alter table public.settings
+  add column if not exists campaign_columns text[];
 
 -- ---------------------------------------------------------------------
 -- Histórico de migrations: faz um futuro `supabase db push` saber que
@@ -865,7 +853,9 @@ insert into supabase_migrations.schema_migrations (version, name) values
   ('20260722130000', 'realtime'),
   ('20260722140000', 'checkout_platforms'),
   ('20260725120000', 'function_grants_lockdown'),
-  ('20260929120000', 'dashboard_prefs')
+  ('20260929120000', 'dashboard_prefs'),
+  ('20260930120000', 'account_currency_funnel'),
+  ('20261001120000', 'campaign_columns')
 on conflict (version) do nothing;
 
 commit;

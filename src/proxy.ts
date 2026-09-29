@@ -4,7 +4,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   CAMPAIGN_VIEW_COOKIE,
   CAMPAIGN_VIEW_PARAMS,
-  parseCampaignView,
   serializeCampaignView,
   type CampaignView,
 } from "@/lib/campaign-view";
@@ -57,10 +56,12 @@ export async function proxy(request: NextRequest) {
     },
   });
 
-  // IMPORTANTE: getUser() revalida o token no servidor de Auth.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // getClaims() valida a ASSINATURA do JWT localmente (chaves assimétricas,
+  // JWKS em cache) e renova a sessão vencida — sem ida ao servidor de Auth a
+  // cada request, que era o custo fixo de toda troca de tela. O layout ainda
+  // confirma o usuário com getUser() (uma vez por request, em cache).
+  const { data: claimsData } = await supabase.auth.getClaims();
+  const user = claimsData?.claims?.sub ? claimsData.claims : null;
 
   const { pathname } = request.nextUrl;
 
@@ -103,7 +104,8 @@ export async function proxy(request: NextRequest) {
     }
 
     // Filtros de Campanhas (status, atribuição, nível, conta): com algum na
-    // URL, viram o novo padrão; sem nenhum, volta o último usado.
+    // URL, viram o novo padrão. Sem nenhum, NÃO redireciona — a própria página
+    // lê o cookie (um redirect aqui era uma viagem a mais por troca de tela).
     if (pathname === "/campanhas") {
       const present = CAMPAIGN_VIEW_PARAMS.filter((key) =>
         url.searchParams.has(key),
@@ -112,17 +114,6 @@ export async function proxy(request: NextRequest) {
         const view: CampaignView = {};
         for (const key of present) view[key] = url.searchParams.get(key)!;
         persistView = serializeCampaignView(view);
-      } else {
-        const remembered = parseCampaignView(
-          request.cookies.get(CAMPAIGN_VIEW_COOKIE)?.value,
-        );
-        for (const key of CAMPAIGN_VIEW_PARAMS) {
-          const value = remembered[key];
-          if (value) {
-            url.searchParams.set(key, value);
-            changed = true;
-          }
-        }
       }
     }
 

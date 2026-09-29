@@ -136,28 +136,28 @@ export async function getMetaDashboard(
   const platforms = new Map<string, BreakdownRow>();
   const placements = new Map<string, BreakdownRow>();
 
-  for (const account of accounts) {
+  // Contas em PARALELO: cada uma é uma ida à Meta; em sequência o tempo somava.
+  await Promise.all(accounts.map(async (account) => {
     if (!account.ads_token) {
       result.errors.push(`${account.label}: token não configurado`);
-      continue;
+      return;
     }
     if (account.rateError) {
       result.errors.push(`${account.label}: ${account.rateError}`);
     }
     const rate = account.rate;
 
-    // Três chamadas por conta — cada uma conta no limite conservador.
-    let allowed = true;
-    for (let i = 0; i < 3 && allowed; i++) {
-      allowed = await rateLimit(
-        `meta:${account.id}`,
-        META_RATE_LIMIT.max,
-        META_RATE_LIMIT.windowSeconds,
-      );
-    }
+    // Uma checagem por carregamento (antes eram três em sequência, uma ida ao
+    // banco cada). As três leituras quase sempre saem do cache, e o limite
+    // já fica muito abaixo do da Meta.
+    const allowed = await rateLimit(
+      `meta:${account.id}`,
+      META_RATE_LIMIT.max,
+      META_RATE_LIMIT.windowSeconds,
+    );
     if (!allowed) {
       result.errors.push(`${account.label}: rate limit interno atingido`);
-      continue;
+      return;
     }
 
     const [daily, hourly, placement] = await Promise.all([
@@ -248,7 +248,7 @@ export async function getMetaDashboard(
         rate,
       );
     }
-  }
+  }));
 
   const bySales = (a: BreakdownRow, b: BreakdownRow) =>
     b.sales - a.sales || b.revenue - a.revenue || b.spend - a.spend;

@@ -19,6 +19,10 @@ import {
   formatPercent,
   formatRoas,
 } from "@/lib/format";
+import {
+  CAMPAIGN_COLUMNS,
+  type CampaignColumn,
+} from "@/lib/campaign-columns";
 import { cn } from "@/lib/utils";
 
 import {
@@ -26,6 +30,7 @@ import {
   setEntityStatus,
   type MetaWriteState,
 } from "./actions";
+import { ColumnEditor } from "./column-editor";
 
 export type TableRow = {
   id: string;
@@ -54,40 +59,34 @@ export type TableRow = {
   cpc: number;
 };
 
-type SortKey = keyof Pick<
-  TableRow,
-  | "name"
-  | "spend"
-  | "sales"
-  | "revenue"
-  | "profit"
-  | "roas"
-  | "checkouts"
-  | "cpa"
-  | "impressions"
-  | "cpm"
-  | "ctr"
-  | "cpc"
-  | "landingViews"
-  | "clicks"
->;
+type SortKey = "name" | CampaignColumn;
 
-const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
-  { key: "name", label: "Nome", numeric: false },
-  { key: "spend", label: "Gasto", numeric: true },
-  { key: "sales", label: "Vendas", numeric: true },
-  { key: "revenue", label: "Faturamento", numeric: true },
-  { key: "profit", label: "Lucro", numeric: true },
-  { key: "roas", label: "ROAS", numeric: true },
-  { key: "checkouts", label: "Checkouts", numeric: true },
-  { key: "cpa", label: "CPA", numeric: true },
-  { key: "impressions", label: "Impressões", numeric: true },
-  { key: "cpm", label: "CPM", numeric: true },
-  { key: "ctr", label: "CTR", numeric: true },
-  { key: "cpc", label: "CPC", numeric: true },
-  { key: "landingViews", label: "Visitas no site", numeric: true },
-  { key: "clicks", label: "Cliques", numeric: true },
-];
+/**
+ * Formatação de cada métrica — a MESMA para a linha e para o total, então a
+ * ordem das colunas (configurável) nunca desalinha corpo e rodapé.
+ */
+const COLUMN_FORMAT: Record<
+  CampaignColumn,
+  {
+    format: (value: number, currency: string) => string;
+    sensitive?: boolean;
+    tone?: (value: number) => string;
+  }
+> = {
+  spend: { format: formatCurrency, sensitive: true },
+  sales: { format: (v) => formatNumber(v) },
+  revenue: { format: formatCurrency, sensitive: true },
+  profit: { format: formatCurrency, sensitive: true, tone: profitTone },
+  roas: { format: (v) => formatRoas(v), tone: roasTone },
+  checkouts: { format: (v) => formatNumber(v) },
+  cpa: { format: formatCurrency, sensitive: true },
+  impressions: { format: (v) => formatNumber(v) },
+  cpm: { format: formatCurrency, sensitive: true },
+  ctr: { format: (v) => formatPercent(v, 2) },
+  cpc: { format: formatCurrency, sensitive: true },
+  landingViews: { format: (v) => formatNumber(v) },
+  clicks: { format: (v) => formatNumber(v) },
+};
 
 const PAGE_SIZE = 25;
 
@@ -109,11 +108,16 @@ export function CampaignsTable({
   rows,
   currency,
   canEdit,
+  columnOrder,
 }: {
   rows: TableRow[];
   currency: string;
   canEdit: boolean;
+  /** Ordem das métricas salva para a área (já normalizada). */
+  columnOrder: CampaignColumn[];
 }) {
+  // Local: ao salvar no editor a tabela já muda, sem esperar o servidor.
+  const [order, setOrder] = useState<CampaignColumn[]>(columnOrder);
   const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [asc, setAsc] = useState(false);
   const [page, setPage] = useState(0);
@@ -193,36 +197,26 @@ export function CampaignsTable({
 
   return (
     <div className="space-y-3">
+      <ColumnEditor order={order} onSaved={setOrder} />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[68rem] text-sm">
           <thead>
             <tr className="border-b border-border text-left">
-              {COLUMNS.map((col) => (
-                <th
-                  key={col.key}
-                  className={cn(
-                    "whitespace-nowrap px-3 py-2 micro-label",
-                    col.numeric && "text-right",
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => toggleSort(col.key)}
-                    className={cn(
-                      "inline-flex items-center gap-1 hover:text-foreground",
-                      col.numeric && "flex-row-reverse",
-                    )}
-                  >
-                    {col.label}
-                    {sortKey === col.key ? (
-                      asc ? (
-                        <ArrowUp className="size-3" />
-                      ) : (
-                        <ArrowDown className="size-3" />
-                      )
-                    ) : null}
-                  </button>
-                </th>
+              <SortHeader
+                label="Nome"
+                active={sortKey === "name"}
+                asc={asc}
+                onClick={() => toggleSort("name")}
+              />
+              {order.map((key) => (
+                <SortHeader
+                  key={key}
+                  label={CAMPAIGN_COLUMNS[key]}
+                  numeric
+                  active={sortKey === key}
+                  asc={asc}
+                  onClick={() => toggleSort(key)}
+                />
               ))}
               {canEdit ? (
                 <th className="px-3 py-2 text-right micro-label">
@@ -249,25 +243,9 @@ export function CampaignsTable({
                     </div>
                   </div>
                 </td>
-                <Num className="sensitive">{formatCurrency(row.spend, currency)}</Num>
-                <Num>{formatNumber(row.sales)}</Num>
-                <Num className="sensitive">
-                  {formatCurrency(row.revenue, currency)}
-                </Num>
-                <Num className={cn("sensitive", profitTone(row.profit))}>
-                  {formatCurrency(row.profit, currency)}
-                </Num>
-                <Num className={roasTone(row.roas)}>
-                  {formatRoas(row.roas)}
-                </Num>
-                <Num>{formatNumber(row.checkouts)}</Num>
-                <Num className="sensitive">{formatCurrency(row.cpa, currency)}</Num>
-                <Num>{formatNumber(row.impressions)}</Num>
-                <Num className="sensitive">{formatCurrency(row.cpm, currency)}</Num>
-                <Num>{formatPercent(row.ctr, 2)}</Num>
-                <Num className="sensitive">{formatCurrency(row.cpc, currency)}</Num>
-                <Num>{formatNumber(row.landingViews)}</Num>
-                <Num>{formatNumber(row.clicks)}</Num>
+                {order.map((key) => (
+                  <MetricCell key={key} column={key} value={row[key]} currency={currency} />
+                ))}
 
                 {canEdit ? (
                   <td className="px-3 py-2">
@@ -283,23 +261,9 @@ export function CampaignsTable({
               <td className="px-3 py-2 text-[0.7rem] uppercase tracking-wider text-muted-foreground">
                 Total ({formatNumber(rows.length)})
               </td>
-              <Num className="sensitive">{formatCurrency(totals.spend, currency)}</Num>
-              <Num>{formatNumber(totals.sales)}</Num>
-              <Num className="sensitive">
-                {formatCurrency(totals.revenue, currency)}
-              </Num>
-              <Num className={cn("sensitive", profitTone(totals.profit))}>
-                {formatCurrency(totals.profit, currency)}
-              </Num>
-              <Num className={roasTone(totals.roas)}>{formatRoas(totals.roas)}</Num>
-              <Num>{formatNumber(totals.checkouts)}</Num>
-              <Num className="sensitive">{formatCurrency(totals.cpa, currency)}</Num>
-              <Num>{formatNumber(totals.impressions)}</Num>
-              <Num className="sensitive">{formatCurrency(totals.cpm, currency)}</Num>
-              <Num>{formatPercent(totals.ctr, 2)}</Num>
-              <Num className="sensitive">{formatCurrency(totals.cpc, currency)}</Num>
-              <Num>{formatNumber(totals.landingViews)}</Num>
-              <Num>{formatNumber(totals.clicks)}</Num>
+              {order.map((key) => (
+                <MetricCell key={key} column={key} value={totals[key]} currency={currency} />
+              ))}
               {canEdit ? <td /> : null}
             </tr>
           </tfoot>
@@ -332,6 +296,64 @@ export function CampaignsTable({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function MetricCell({
+  column,
+  value,
+  currency,
+}: {
+  column: CampaignColumn;
+  value: number;
+  currency: string;
+}) {
+  const f = COLUMN_FORMAT[column];
+  return (
+    <Num className={cn(f.sensitive && "sensitive", f.tone?.(value))}>
+      {f.format(value, currency)}
+    </Num>
+  );
+}
+
+function SortHeader({
+  label,
+  numeric = false,
+  active,
+  asc,
+  onClick,
+}: {
+  label: string;
+  numeric?: boolean;
+  active: boolean;
+  asc: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <th
+      className={cn(
+        "whitespace-nowrap px-3 py-2 micro-label",
+        numeric && "text-right",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "inline-flex items-center gap-1 hover:text-foreground",
+          numeric && "flex-row-reverse",
+        )}
+      >
+        {label}
+        {active ? (
+          asc ? (
+            <ArrowUp className="size-3" />
+          ) : (
+            <ArrowDown className="size-3" />
+          )
+        ) : null}
+      </button>
+    </th>
   );
 }
 

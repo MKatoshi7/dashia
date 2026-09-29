@@ -76,7 +76,10 @@ export function StatTile({
   );
 }
 
-/** Anel de progresso em SVG (0–100). Vazio quando não há dado. */
+/**
+ * Anel de progresso em SVG (0–100). Vazio quando não há dado.
+ * Cores via `style` (CSS resolve var()); como ATRIBUTO o Safari pinta preto.
+ */
 function Ring({ value }: { value: number | null }) {
   const radius = 9;
   const circumference = 2 * Math.PI * radius;
@@ -84,13 +87,13 @@ function Ring({ value }: { value: number | null }) {
 
   return (
     <svg viewBox="0 0 24 24" className="size-6 -rotate-90" aria-hidden="true">
-      <circle cx="12" cy="12" r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth="3" />
+      <circle cx="12" cy="12" r={radius} fill="none" style={{ stroke: "hsl(var(--muted))" }} strokeWidth="3" />
       <circle
         cx="12"
         cy="12"
         r={radius}
         fill="none"
-        stroke="hsl(var(--primary))"
+        style={{ stroke: "hsl(var(--primary))" }}
         strokeWidth="3"
         strokeLinecap="round"
         strokeDasharray={`${filled} ${circumference}`}
@@ -194,8 +197,8 @@ export function ConversionFunnel({
         >
           <defs>
             <linearGradient id="funnelFill" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor="hsl(var(--primary))" />
-              <stop offset="100%" stopColor="hsl(var(--accent-purple))" />
+              <stop offset="0%" style={{ stopColor: "hsl(var(--primary))" }} />
+              <stop offset="100%" style={{ stopColor: "hsl(var(--accent-purple))" }} />
             </linearGradient>
           </defs>
           <path d={`${top} ${bottom} Z`} fill="url(#funnelFill)" />
@@ -206,7 +209,7 @@ export function ConversionFunnel({
               x2={(i + 1) * column}
               y1={0}
               y2={height}
-              stroke="hsl(var(--border))"
+              style={{ stroke: "hsl(var(--border))" }}
               vectorEffect="non-scaling-stroke"
             />
           ))}

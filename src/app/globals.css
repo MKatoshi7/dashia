@@ -83,6 +83,68 @@
   --stripe-alpha: 0.02;
 }
 
+/* Lima — grafite quase preto com acento verde-limão (ref. do cliente). */
+:root[data-theme="lime"] {
+  --background: 90 6% 4%;
+  --foreground: 0 0% 98%;
+
+  --card: 90 4% 9%;
+  --card-foreground: 0 0% 98%;
+
+  --muted: 90 4% 13%;
+  --muted-foreground: 80 5% 62%;
+
+  --border: 90 4% 16%;
+  --input: 90 4% 19%;
+  --ring: 76 92% 58%;
+
+  --primary: 76 92% 58%;
+  --primary-foreground: 90 25% 6%;
+
+  --accent-cyan: 76 92% 58%;
+  --accent-purple: 190 75% 52%;
+  --accent-emerald: 142 71% 45%;
+  --accent-amber: 45 93% 58%;
+  --destructive: 0 84% 62%;
+
+  --glass-bg: 90 4% 10%;
+  --glass-opacity: 0.75;
+
+  --hairline: 255 255 255;
+  --stripe-alpha: 0.012;
+}
+
+/* Azul — ardósia azulada com acento azul (ref. do cliente). */
+:root[data-theme="ocean"] {
+  --background: 222 24% 14%;
+  --foreground: 0 0% 98%;
+
+  --card: 220 22% 20%;
+  --card-foreground: 0 0% 98%;
+
+  --muted: 220 20% 25%;
+  --muted-foreground: 218 14% 70%;
+
+  --border: 220 18% 28%;
+  --input: 220 18% 31%;
+  --ring: 214 88% 56%;
+
+  --primary: 214 88% 56%;
+  --primary-foreground: 0 0% 100%;
+
+  --accent-cyan: 199 89% 60%;
+  --accent-purple: 262 83% 70%;
+  --accent-emerald: 142 69% 50%;
+  --accent-amber: 38 92% 58%;
+  --destructive: 0 84% 64%;
+
+  --glass-bg: 220 22% 20%;
+  --glass-opacity: 0.9;
+
+  --hairline: 255 255 255;
+  --stripe-alpha: 0.01;
+}
+
 /* Mapeia as variáveis para utilitários do Tailwind v4 (bg-card, text-primary...) */
 @theme inline {
   --color-background: hsl(var(--background));
@@ -321,8 +383,9 @@
     );
   }
 
-  /* Mostra o ativo conforme o tema (usado nos logos claro/escuro do branding) */
-  :root[data-theme="dark"] .theme-light-only {
+  /* Mostra o ativo conforme o tema (usado nos logos claro/escuro do branding).
+     Lima e Azul são temas escuros: usam o logo do tema escuro. */
+  :root:not([data-theme="light"]) .theme-light-only {
     display: none;
   }
   :root[data-theme="light"] .theme-dark-only {

@@ -13,7 +13,7 @@ import {
   toYmd,
   type AdAccount,
 } from "./client";
-import { META_GRAPH_BASE, META_RATE_LIMIT } from "./config";
+import { META_CACHE_TAG, META_GRAPH_BASE, META_RATE_LIMIT } from "./config";
 
 /**
  * Hierarquia campanha → conjunto → anúncio, vinda da Ads API.
@@ -79,7 +79,9 @@ export async function metaFetch(
   cacheSeconds: number,
 ): Promise<{ data: unknown[]; error: string | null }> {
   try {
-    const response = await fetch(url, { next: { revalidate: cacheSeconds } });
+    const response = await fetch(url, {
+      next: { revalidate: cacheSeconds, tags: [META_CACHE_TAG] },
+    });
 
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as {
@@ -169,10 +171,11 @@ export async function getMetaEntities(
   const rows: MetaEntity[] = [];
   const errors: string[] = [];
 
-  for (const account of accounts) {
+  // Contas em PARALELO: cada uma é uma ida à Meta; em sequência o tempo somava.
+  await Promise.all(accounts.map(async (account) => {
     if (!account.ads_token) {
       errors.push(`${account.label}: token não configurado`);
-      continue;
+      return;
     }
     if (account.rateError) errors.push(`${account.label}: ${account.rateError}`);
 
@@ -184,7 +187,7 @@ export async function getMetaEntities(
     );
     if (!allowed) {
       errors.push(`${account.label}: rate limit interno atingido`);
-      continue;
+      return;
     }
 
     const [insights, entities] = await Promise.all([
@@ -279,7 +282,7 @@ export async function getMetaEntities(
         adIds: level === "ad" ? [id] : metrics.adIds,
       });
     }
-  }
+  }));
 
   return { rows, configured: true, errors };
 }

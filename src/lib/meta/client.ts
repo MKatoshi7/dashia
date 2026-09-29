@@ -1,15 +1,18 @@
 import "server-only";
 
+import { cache } from "react";
+
 import { decryptSecret } from "@/lib/crypto";
 import { rateLimit } from "@/lib/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-import { getLiveRate } from "./fx";
 import {
   META_CACHE,
+  META_CACHE_TAG,
   META_GRAPH_BASE,
   META_RATE_LIMIT,
 } from "./config";
+import { getLiveRate } from "./fx";
 
 /**
  * Cliente da Meta Ads — SOMENTE LEITURA de insights nesta fase.
@@ -124,72 +127,96 @@ export const LANDING_PAGE_VIEW_ACTIONS = [
  * USD aparecer em R$ ao lado de uma conta em BRL. Orçamento é exceção: volta
  * para a Meta, então fica na moeda da conta.
  */
-export async function getAdAccounts(areaId: string): Promise<AdAccount[]> {
-  const admin = createAdminClient();
+export const getAdAccounts = cache(
+  async (areaId: string): Promise<AdAccount[]> => {
+    const admin = createAdminClient();
 
-  // `*` de propósito: antes da migration account_currency_funnel, currency e
-  // fx_rate não vêm e a conta é tratada na moeda da área (sem erro 42703).
-  const { data, error } = await admin
-    .from("meta_ad_accounts")
-    .select("*")
-    .eq("area_id", areaId);
+    // As duas leituras em paralelo (antes eram em sequência).
+    // `*` de propósito: antes da migration account_currency_funnel, currency e
+    // fx_rate não vêm e a conta é tratada na moeda da área (sem erro 42703).
+    const [{ data, error }, { data: settings }] = await Promise.all([
+      admin.from("meta_ad_accounts").select("*").eq("area_id", areaId),
+      admin
+        .from("settings")
+        .select("currency")
+        .eq("area_id", areaId)
+        .maybeSingle(),
+    ]);
 
-  if (error || !data) return [];
+    if (error || !data) return [];
+    const areaCurrency = String(settings?.currency ?? "BRL").toUpperCase();
 
-  const { data: settings } = await admin
-    .from("settings")
-    .select("currency")
-    .eq("area_id", areaId)
-    .maybeSingle();
-  const areaCurrency = String(settings?.currency ?? "BRL").toUpperCase();
-
-  const accounts = await Promise.all(
-    data.map(async (raw) => {
-      const row = raw as Record<string, unknown>;
-      const cipher = row.ads_token as string | null;
-      let token: string | null = null;
-      if (cipher) {
-        try {
-          token = await decryptSecret(cipher);
-        } catch (err) {
-          console.error("[meta] falha ao decifrar ads_token:", err);
-        }
-      }
-
-      const currency =
-        typeof row.currency === "string" && row.currency
-          ? row.currency.toUpperCase()
-          : areaCurrency;
-      const fixed = Number(row.fx_rate);
-
-      let rate = 1;
-      let rateError: string | null = null;
-      if (currency !== areaCurrency) {
-        if (Number.isFinite(fixed) && fixed > 0) {
-          rate = fixed;
-        } else {
-          const live = await getLiveRate(currency, areaCurrency);
-          if (live) {
-            rate = live;
-          } else {
-            rateError = `cotação ${currency}→${areaCurrency} indisponível; valores exibidos em ${currency}. Fixe a cotação em Integrações.`;
+    const accounts = await Promise.all(
+      data.map(async (raw) => {
+        const row = raw as Record<string, unknown>;
+        const cipher = row.ads_token as string | null;
+        let token: string | null = null;
+        if (cipher) {
+          try {
+            token = await decryptCached(cipher);
+          } catch (err) {
+            console.error("[meta] falha ao decifrar ads_token:", err);
           }
         }
-      }
 
-      return {
-        id: row.id as string,
-        label: row.label as string,
-        ad_account_id: row.ad_account_id as string,
-        ads_token: token,
-        currency,
-        rate,
-        rateError,
-      } satisfies AdAccount;
-    }),
-  );
+        const currency =
+          typeof row.currency === "string" && row.currency
+            ? row.currency.toUpperCase()
+            : areaCurrency;
+        const fixed = Number(row.fx_rate);
 
-  return accounts;
+        let rate = 1;
+        let rateError: string | null = null;
+        if (currency !== areaCurrency) {
+          if (Number.isFinite(fixed) && fixed > 0) {
+            rate = fixed;
+          } else {
+            const live = await getLiveRate(currency, areaCurrency);
+            if (live) {
+              rate = live;
+            } else {
+              rateError = `cotação ${currency}→${areaCurrency} indisponível; valores exibidos em ${currency}. Fixe a cotação em Integrações.`;
+            }
+          }
+        }
+
+        return {
+          id: row.id as string,
+          label: row.label as string,
+          ad_account_id: row.ad_account_id as string,
+          ads_token: token,
+          currency,
+          rate,
+          rateError,
+        } satisfies AdAccount;
+      }),
+    );
+
+    return accounts;
+  },
+);
+
+/**
+ * Decifra com memória curta no processo do servidor. Cada decifra é uma ida
+ * ao banco (app_decrypt), e toda troca de tela lia o mesmo token de novo — as
+ * contas de uma área normalmente compartilham o MESMO ciphertext. O token em
+ * claro só existe na memória do servidor, nunca vai para o browser; trocar o
+ * token muda o ciphertext, então a entrada antiga simplesmente deixa de ser
+ * usada.
+ */
+const DECRYPT_TTL_MS = 10 * 60 * 1000;
+const decrypted = new Map<string, { value: Promise<string>; expires: number }>();
+
+function decryptCached(cipher: string): Promise<string> {
+  const now = Date.now();
+  const hit = decrypted.get(cipher);
+  if (hit && hit.expires > now) return hit.value;
+
+  const value = decryptSecret(cipher);
+  decrypted.set(cipher, { value, expires: now + DECRYPT_TTL_MS });
+  // Falhou: não guarda o erro, a próxima leitura tenta de novo.
+  value.catch(() => decrypted.delete(cipher));
+  return value;
 }
 
 /**
@@ -221,10 +248,11 @@ export async function getAreaInsights(
   const dailySpend: Record<string, number> = {};
   const errors: string[] = [];
 
-  for (const account of accounts) {
+  // Contas em PARALELO: cada uma é uma ida à Meta; em sequência o tempo somava.
+  await Promise.all(accounts.map(async (account) => {
     if (!account.ads_token) {
       errors.push(`${account.label}: token não configurado`);
-      continue;
+      return;
     }
     if (account.rateError) errors.push(`${account.label}: ${account.rateError}`);
 
@@ -236,7 +264,7 @@ export async function getAreaInsights(
     );
     if (!allowed) {
       errors.push(`${account.label}: rate limit interno atingido`);
-      continue;
+      return;
     }
 
     const params = new URLSearchParams({
@@ -251,7 +279,7 @@ export async function getAreaInsights(
 
     try {
       const response = await fetch(url, {
-        next: { revalidate: cacheSecondsFor(to) },
+        next: { revalidate: cacheSecondsFor(to), tags: [META_CACHE_TAG] },
       });
 
       if (!response.ok) {
@@ -261,7 +289,7 @@ export async function getAreaInsights(
         errors.push(
           `${account.label}: ${body?.error?.message ?? `HTTP ${response.status}`}`,
         );
-        continue;
+        return;
       }
 
       const payload = (await response.json()) as { data?: unknown[] };
@@ -287,7 +315,7 @@ export async function getAreaInsights(
         `${account.label}: ${err instanceof Error ? err.message : "falha na requisição"}`,
       );
     }
-  }
+  }));
 
   return { insights: totals, dailySpend, configured: true, errors };
 }

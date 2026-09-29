@@ -1,12 +1,13 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
 import { AREA_COOKIE } from "@/lib/areas";
 import { getCurrentUser } from "@/lib/auth";
+import { META_CACHE_TAG } from "@/lib/meta/config";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -44,6 +45,16 @@ async function audit(
   } catch {
     // Auditoria nunca deve derrubar a operação principal.
   }
+}
+
+/**
+ * Botão "Atualizar" do header: expira o cache da Meta (senão os números podem
+ * ter até 5 min) e a página é renderizada de novo com dados frescos.
+ */
+export async function refreshMetaData() {
+  const user = await getCurrentUser();
+  if (!user) redirect("/login");
+  updateTag(META_CACHE_TAG);
 }
 
 export async function signOut() {
