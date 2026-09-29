@@ -1,6 +1,13 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+import {
+  CAMPAIGN_VIEW_COOKIE,
+  CAMPAIGN_VIEW_PARAMS,
+  parseCampaignView,
+  serializeCampaignView,
+  type CampaignView,
+} from "@/lib/campaign-view";
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
 import { PERIOD_COOKIE, PERIOD_PARAMS } from "@/lib/period";
 
@@ -16,10 +23,6 @@ import { PERIOD_COOKIE, PERIOD_PARAMS } from "@/lib/period";
  */
 
 const PUBLIC_PATHS = ["/login", "/setup"];
-
-/** Filtros da tela Campanhas lembrados entre abas (sem a busca por nome). */
-const CAMPAIGN_VIEW_COOKIE = "campaign_view";
-const CAMPAIGN_VIEW_PARAMS = ["status", "attr", "level", "account"] as const;
 
 function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/")) return true;
@@ -106,19 +109,18 @@ export async function proxy(request: NextRequest) {
         url.searchParams.has(key),
       );
       if (present.length > 0) {
-        const view = new URLSearchParams();
-        for (const key of present) view.set(key, url.searchParams.get(key)!);
-        persistView = view.toString();
+        const view: CampaignView = {};
+        for (const key of present) view[key] = url.searchParams.get(key)!;
+        persistView = serializeCampaignView(view);
       } else {
-        const savedView = request.cookies.get(CAMPAIGN_VIEW_COOKIE)?.value;
-        if (savedView) {
-          const remembered = new URLSearchParams(decodeURIComponent(savedView));
-          for (const key of CAMPAIGN_VIEW_PARAMS) {
-            const value = remembered.get(key);
-            if (value) {
-              url.searchParams.set(key, value);
-              changed = true;
-            }
+        const remembered = parseCampaignView(
+          request.cookies.get(CAMPAIGN_VIEW_COOKIE)?.value,
+        );
+        for (const key of CAMPAIGN_VIEW_PARAMS) {
+          const value = remembered[key];
+          if (value) {
+            url.searchParams.set(key, value);
+            changed = true;
           }
         }
       }
@@ -132,7 +134,7 @@ export async function proxy(request: NextRequest) {
         .forEach((cookie) => response.cookies.set(cookie));
     }
     if (persistView !== null) {
-      response.cookies.set(CAMPAIGN_VIEW_COOKIE, encodeURIComponent(persistView), {
+      response.cookies.set(CAMPAIGN_VIEW_COOKIE, persistView, {
         path: "/",
         maxAge: 31_536_000,
         sameSite: "lax",

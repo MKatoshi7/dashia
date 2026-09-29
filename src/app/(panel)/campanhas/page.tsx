@@ -1,9 +1,15 @@
 import { Info, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import Link from "next/link";
 
 import { Card } from "@/components/ui/card";
 import { getActiveArea } from "@/lib/areas";
+import {
+  CAMPAIGN_VIEW_COOKIE,
+  DEFAULT_CAMPAIGN_STATUS,
+  parseCampaignView,
+} from "@/lib/campaign-view";
 import { getFunnelBase, getLastClickByAd } from "@/lib/attribution";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { getAccountOptions, getMetaEntities, type MetaLevel } from "@/lib/meta/campaigns";
@@ -46,7 +52,16 @@ export default async function CampanhasPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const params = await searchParams;
+  // Filtros: URL > último usado (cookie) > padrão. A página lê o cookie ela
+  // mesma porque um prefetch antigo do menu pode chegar sem os parâmetros.
+  const saved = parseCampaignView(
+    (await cookies()).get(CAMPAIGN_VIEW_COOKIE)?.value,
+  );
+  const params: SearchParams = {
+    ...saved,
+    ...(await searchParams),
+  };
+  params.status ??= DEFAULT_CAMPAIGN_STATUS;
   const period = resolvePeriod(params);
 
   const level = (LEVELS.find((l) => l.key === params.level)?.key ??
@@ -244,7 +259,11 @@ export default async function CampanhasPage({
         </div>
       </div>
 
-      <CampaignFilters accounts={accounts} />
+      <CampaignFilters
+        accounts={accounts}
+        status={params.status}
+        account={params.account ?? ""}
+      />
 
       {!meta.configured ? (
         <Card className="flex items-start gap-3 p-4">
