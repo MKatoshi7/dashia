@@ -835,6 +835,32 @@ alter table public.settings
   add column if not exists campaign_columns text[];
 
 -- ---------------------------------------------------------------------
+-- 20261002120000_purchase_order_role.sql
+-- ---------------------------------------------------------------------
+-- =============================================================================
+-- Order bump / upsell: um pedido = uma venda
+-- =============================================================================
+-- Algumas plataformas (ex.: Cakto) mandam cada order bump como um pedido
+-- separado, marcado com o papel do item e o pedido principal:
+--   purchases.order_role   → main / orderbump / upsell / downsell (NULL quando
+--                            a plataforma não informa — conta como venda, como
+--                            sempre foi);
+--   purchases.parent_order → id do pedido principal ao qual o item pertence.
+-- O VALOR de todos os itens soma no faturamento; só o principal conta como
+-- venda (regra em src/lib/sales.ts).
+--
+-- Idempotente: pode rodar de novo sem erro.
+-- =============================================================================
+
+alter table public.purchases
+  add column if not exists order_role text,
+  add column if not exists parent_order text;
+
+create index if not exists purchases_parent_order_idx
+  on public.purchases (parent_order)
+  where parent_order is not null;
+
+-- ---------------------------------------------------------------------
 -- Histórico de migrations: faz um futuro `supabase db push` saber que
 -- estas já foram aplicadas, evitando reaplicar tudo por cima.
 -- ---------------------------------------------------------------------
@@ -855,7 +881,8 @@ insert into supabase_migrations.schema_migrations (version, name) values
   ('20260725120000', 'function_grants_lockdown'),
   ('20260929120000', 'dashboard_prefs'),
   ('20260930120000', 'account_currency_funnel'),
-  ('20261001120000', 'campaign_columns')
+  ('20261001120000', 'campaign_columns'),
+  ('20261002120000', 'purchase_order_role')
 on conflict (version) do nothing;
 
 commit;

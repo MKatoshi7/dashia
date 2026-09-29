@@ -62,7 +62,14 @@ function authenticate(
 
   if (auth.mode === "body-token") {
     const provided = firstString(payload, auth.bodyPaths ?? []);
-    return provided ? safeEqual(provided, secret) : false;
+    if (provided && safeEqual(provided, secret)) return true;
+    // Headers declarados valem como alternativa (ex.: Cakto documenta o
+    // segredo no corpo, mas mantemos os headers por garantia).
+    return (auth.headers ?? []).some((name) => {
+      const value = request.headers.get(name);
+      if (!value) return false;
+      return safeEqual(value.replace(/^Bearer\s+/i, "").trim(), secret);
+    });
   }
 
   // hmac: assinatura do CORPO BRUTO, em header ou query string.
@@ -216,6 +223,18 @@ export async function POST(
   const source = withMeta(platform, payload);
   const { paths } = platform;
 
+  // Eventos que não são venda (ex.: abandono de checkout): 200 sem gravar,
+  // senão a plataforma reenviaria para sempre.
+  const eventName = firstString(source, paths.event ?? []);
+  if (
+    eventName &&
+    platform.ignoreEvents?.some((needle) =>
+      eventName.toLowerCase().includes(needle.toLowerCase()),
+    )
+  ) {
+    return json({ ok: true, ignored: "event" }, 200);
+  }
+
   // Leitura de texto tratando os valores-sentinela da plataforma como vazio.
   const pick = (candidates: string[] | undefined) =>
     deplaceholder(platform, firstString(source, candidates ?? []));
@@ -227,11 +246,7 @@ export async function POST(
     return json({ ok: true, ignored: "missing_transaction" }, 200);
   }
 
-  const status = mapStatus(
-    platform,
-    firstString(source, paths.status),
-    firstString(source, paths.event ?? []),
-  );
+  const status = mapStatus(platform, firstString(source, paths.status), eventName);
 
   const rawUserId = pick(paths.userId);
   const piped = unpackPiped(platform, rawUserId);
@@ -283,6 +298,9 @@ export async function POST(
       valor: normalizeAmount(platform, firstNumber(source, paths.value)),
       moeda: pick(paths.currency),
       adId,
+      // Order bump / upsell: soma no faturamento, mas não é venda nova.
+      orderRole: pick(paths.offerType),
+      parentOrder: pick(paths.parentOrder),
       // raw_webhook = payload ORIGINAL (sem o _meta sintético).
       raw: payload,
       utm,

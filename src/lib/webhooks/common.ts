@@ -6,7 +6,7 @@ import { PLATFORM_IDS } from "@/lib/checkout/platforms";
 import { decryptSecret } from "@/lib/crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-import { extractAdId } from "./parse";
+import { extractAdId, get } from "./parse";
 import type { PurchaseStatus } from "./status";
 
 // Helpers puros de parsing vivem em ./parse (testáveis fora do Next).
@@ -112,6 +112,10 @@ export type PurchaseInput = {
    */
   utm?: PurchaseUtm;
   geo?: PurchaseGeo;
+  /** Papel no pedido (main / orderbump / upsell…) — ver src/lib/sales.ts. */
+  orderRole?: string | null;
+  /** Pedido principal deste item, quando é complemento (order bump…). */
+  parentOrder?: string | null;
   raw: unknown;
 };
 
@@ -153,6 +157,8 @@ const PurchaseInputSchema = z.object({
   geo: z
     .object({ country: FreeText, region: FreeText, city: FreeText })
     .optional(),
+  orderRole: FreeText,
+  parentOrder: FreeText,
   raw: z.unknown(),
 });
 
@@ -270,12 +276,23 @@ export async function savePurchase(input: PurchaseInput): Promise<void> {
   const utm = clean.utm;
   const geo = clean.geo;
 
+  const orderRole = clip(clean.orderRole, 32)?.toLowerCase() ?? null;
+  const parentOrder = clip(clean.parentOrder, 120);
+
+  // Complemento (order bump…) sem rastreio próprio herda o do pedido pai: é
+  // a MESMA compra, veio do MESMO anúncio.
+  const parent = parentOrder
+    ? await findParentPurchase(clean.areaId, parentOrder)
+    : null;
+
   // Fallback final. `extractAdId` também desmonta valores compostos aqui —
   // a rota já tentou os campos nativos com a preferência da plataforma.
   const adId =
     clean.adId ??
     extractAdId(clip(utm?.content, 512)) ??
-    extractAdId(visitor?.utm_content ?? null);
+    extractAdId(visitor?.utm_content ?? null) ??
+    parent?.ad_id ??
+    null;
 
   const { error } = await admin.from("purchases").upsert(
     {
@@ -289,12 +306,18 @@ export async function savePurchase(input: PurchaseInput): Promise<void> {
       moeda: clean.moeda,
       status: clean.status,
       plataforma: clean.plataforma,
-      utm_source: clip(utm?.source, 255) ?? visitor?.utm_source ?? null,
-      utm_medium: clip(utm?.medium, 255) ?? visitor?.utm_medium ?? null,
-      utm_campaign: clip(utm?.campaign, 255) ?? visitor?.utm_campaign ?? null,
-      utm_term: clip(utm?.term, 255) ?? visitor?.utm_term ?? null,
-      utm_content: clip(utm?.content, 512) ?? visitor?.utm_content ?? null,
+      utm_source:
+        clip(utm?.source, 255) ?? visitor?.utm_source ?? parent?.utm_source ?? null,
+      utm_medium:
+        clip(utm?.medium, 255) ?? visitor?.utm_medium ?? parent?.utm_medium ?? null,
+      utm_campaign:
+        clip(utm?.campaign, 255) ?? visitor?.utm_campaign ?? parent?.utm_campaign ?? null,
+      utm_term: clip(utm?.term, 255) ?? visitor?.utm_term ?? parent?.utm_term ?? null,
+      utm_content:
+        clip(utm?.content, 512) ?? visitor?.utm_content ?? parent?.utm_content ?? null,
       ad_id: adId,
+      order_role: orderRole,
+      parent_order: parentOrder,
       geo_country: clip(geo?.country, 2) ?? visitor?.geo_country ?? null,
       geo_region: clip(geo?.region, 64) ?? visitor?.geo_region ?? null,
       geo_city: clip(geo?.city, 120) ?? visitor?.geo_city ?? null,
@@ -303,6 +326,89 @@ export async function savePurchase(input: PurchaseInput): Promise<void> {
     },
     { onConflict: "transaction_id" },
   );
+
+  if (error) throw error;
+
+  // Pedido principal chegou DEPOIS dos complementos: preenche o rastreio que
+  // eles não tinham. Falha aqui não invalida a compra já gravada.
+  if (!parentOrder && adId) {
+    await backfillChildren(clean.areaId, clean.transactionId, clean.raw, {
+      ad_id: adId,
+      utm_source: clip(utm?.source, 255),
+      utm_medium: clip(utm?.medium, 255),
+      utm_campaign: clip(utm?.campaign, 255),
+      utm_term: clip(utm?.term, 255),
+      utm_content: clip(utm?.content, 512),
+    }).catch((err) => console.error("[webhook] backfill de order bump:", err));
+  }
+}
+
+type ParentRow = {
+  ad_id: string | null;
+  utm_source: string | null;
+  utm_medium: string | null;
+  utm_campaign: string | null;
+  utm_term: string | null;
+  utm_content: string | null;
+};
+
+const PARENT_COLUMNS =
+  "ad_id, utm_source, utm_medium, utm_campaign, utm_term, utm_content";
+
+/**
+ * O pedido pai pode ser referenciado pelo id que usamos como transaction_id
+ * ou por um id curto da plataforma (ex.: `refId` da Cakto, que fica no
+ * raw_webhook). Tenta os dois.
+ */
+async function findParentPurchase(
+  areaId: string,
+  parentOrder: string,
+): Promise<ParentRow | null> {
+  const admin = createAdminClient();
+
+  const byId = await admin
+    .from("purchases")
+    .select(PARENT_COLUMNS)
+    .eq("area_id", areaId)
+    .eq("transaction_id", parentOrder)
+    .maybeSingle();
+  if (byId.data) return byId.data as ParentRow;
+
+  const byRef = await admin
+    .from("purchases")
+    .select(PARENT_COLUMNS)
+    .eq("area_id", areaId)
+    .eq("raw_webhook->data->>refId", parentOrder)
+    .limit(1)
+    .maybeSingle();
+  return (byRef.data as ParentRow | null) ?? null;
+}
+
+/** Ids pelos quais os complementos podem apontar para este pedido. */
+function orderAliases(transactionId: string, raw: unknown): string[] {
+  const ref = get(raw, "data.refId");
+  return typeof ref === "string" && ref && ref !== transactionId
+    ? [transactionId, ref]
+    : [transactionId];
+}
+
+async function backfillChildren(
+  areaId: string,
+  transactionId: string,
+  raw: unknown,
+  tracking: ParentRow,
+): Promise<void> {
+  const admin = createAdminClient();
+  const patch = Object.fromEntries(
+    Object.entries(tracking).filter(([, v]) => v !== null),
+  );
+
+  const { error } = await admin
+    .from("purchases")
+    .update(patch)
+    .eq("area_id", areaId)
+    .in("parent_order", orderAliases(transactionId, raw))
+    .is("ad_id", null);
 
   if (error) throw error;
 }

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isPrimarySale } from "@/lib/sales";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -75,6 +76,8 @@ type PurchaseRow = {
   produto: string | null;
   geo_country: string | null;
   geo_region: string | null;
+  order_role: string | null;
+  parent_order: string | null;
 };
 
 export async function getPurchaseMetrics(
@@ -88,7 +91,9 @@ export async function getPurchaseMetrics(
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("purchases")
-      .select("id, created_at, valor, status, produto, geo_country, geo_region")
+      .select(
+        "id, created_at, valor, status, produto, geo_country, geo_region, order_role, parent_order",
+      )
       .eq("area_id", areaId)
       .gte("created_at", from.toISOString())
       .lte("created_at", to.toISOString())
@@ -116,8 +121,10 @@ export async function getPurchaseMetrics(
 
     switch (row.status) {
       case "approved": {
+        // Order bump soma no faturamento, mas o pedido é UMA venda.
+        const primary = isPrimarySale(row);
         metrics.revenue += value;
-        metrics.sales += 1;
+        if (primary) metrics.sales += 1;
 
         const day = row.created_at.slice(0, 10);
         revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + value);
@@ -129,7 +136,7 @@ export async function getPurchaseMetrics(
           sales: 0,
           revenue: 0,
         };
-        region.sales += 1;
+        if (primary) region.sales += 1;
         region.revenue += value;
         regionMap.set(key, region);
         break;
@@ -157,7 +164,7 @@ export async function getPurchaseMetrics(
   metrics.regions = [...regionMap.values()].sort((a, b) => b.sales - a.sales);
 
   metrics.recent = rows
-    .filter((r) => r.status === "approved")
+    .filter((r) => r.status === "approved" && isPrimarySale(r))
     .slice(0, 12)
     .map((r) => ({
       id: r.id,
@@ -272,6 +279,8 @@ export async function getCheckoutBreakdown(
     const select = [
       "status",
       "valor",
+      "order_role",
+      "parent_order",
       ...PAYMENT_PATHS.map((path, i) => `pm${i}:${path}`),
     ].join(", ");
 
@@ -292,11 +301,17 @@ export async function getCheckoutBreakdown(
         PAYMENT_PATHS.map((_, i) => raw[`pm${i}`]).find(Boolean),
       );
       const stats = result.byMethod[method];
-      stats.total += 1;
+      // Taxa de aprovação e contagem por método: por PEDIDO (o bump segue o
+      // pagamento do principal). Valores somam todos os itens.
+      const primary = isPrimarySale({
+        order_role: raw.order_role as string | null,
+        parent_order: raw.parent_order as string | null,
+      });
+      if (primary) stats.total += 1;
 
       switch (raw.status) {
         case "approved":
-          stats.approved += 1;
+          if (primary) stats.approved += 1;
           stats.approvedValue += value;
           break;
         case "pending":

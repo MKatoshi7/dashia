@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { formatCurrency } from "@/lib/format";
 import type { RecentSale } from "@/lib/metrics";
+import { isPrimarySale } from "@/lib/sales";
 import { createClient } from "@/lib/supabase/client";
 
 /**
@@ -60,8 +61,14 @@ export function RealtimeSales({
             filter: `area_id=eq.${areaId}`,
           },
           (payload) => {
-            const row = payload.new as RecentSale & { status?: string };
-            if (row.status !== "approved") return;
+            const row = payload.new as RecentSale & {
+              status?: string;
+              order_role?: string | null;
+              parent_order?: string | null;
+            };
+            // Order bump não aparece como venda nova no feed (mesma regra
+            // das métricas — ver src/lib/sales.ts).
+            if (row.status !== "approved" || !isPrimarySale(row)) return;
 
             setSales((prev) =>
               [

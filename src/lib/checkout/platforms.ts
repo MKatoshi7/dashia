@@ -38,7 +38,10 @@ export type PlatformAuth = {
   headers?: string[];
   /** Parâmetros de query candidatos (para HMAC em query, ex.: Kiwify). */
   queryParams?: string[];
-  /** Caminhos candidatos no corpo (para `body-token`). */
+  /**
+   * Caminhos candidatos no corpo (para `body-token`). Com `headers` também
+   * declarados, eles valem como alternativa ao corpo.
+   */
   bodyPaths?: string[];
   /** Algoritmos aceitos para HMAC, na ordem de tentativa. */
   algorithms?: ("sha256" | "sha1")[];
@@ -66,6 +69,14 @@ export type PlatformPaths = {
   geoCountry?: string[];
   geoRegion?: string[];
   geoCity?: string[];
+  /**
+   * Papel do item no pedido (ex.: Cakto `offer_type`: main / orderbump /
+   * upsell / downsell). Item que não é "main" soma no faturamento mas NÃO
+   * conta como venda nova — um pedido com order bump é UMA venda.
+   */
+  offerType?: string[];
+  /** Pedido principal ao qual este item pertence (ex.: Cakto `parent_order`). */
+  parentOrder?: string[];
 };
 
 export type CheckoutPlatform = {
@@ -110,6 +121,11 @@ export type CheckoutPlatform = {
    * `_meta.<chave>` — então os caminhos podem referenciar `_meta.utm_content`.
    */
   metaArray?: { path: string; keyField: string; valueField: string };
+  /**
+   * Eventos que NÃO são venda e devem ser ignorados (respondidos com 200 para
+   * não haver reenvio). Comparação por substring, sem diferenciar maiúsculas.
+   */
+  ignoreEvents?: string[];
   /** Passo a passo de conexão, mostrado quando a plataforma é selecionada. */
   steps: string[];
   /** Observações honestas sobre o que ainda não foi verificado. */
@@ -489,48 +505,65 @@ export const CHECKOUT_PLATFORMS: CheckoutPlatform[] = [
     id: "cakto",
     label: "Cakto",
     confirmed: false,
-    // O exemplo mostra amount "34.35" / baseAmount "33.00" → reais (decimal).
+    // Doc oficial: amount 5.55 / baseAmount 5.55 → reais (decimal).
     amountInCents: false,
     trackingParam: "utm_content",
-    auth: { mode: "header-token", headers: ["x-cakto-signature", "authorization"] },
+    // Doc oficial: o corpo é { secret, event, data } e NÃO há header de
+    // assinatura — o segredo vem em `secret`. Headers ficam como reserva.
+    auth: {
+      mode: "body-token",
+      bodyPaths: ["secret"],
+      headers: ["x-cakto-signature", "authorization"],
+    },
     secretLabel: "Segredo do webhook",
     secretHint: "Configurações → Webhooks",
     steps: [
       "Na Cakto, abra Configurações → Webhooks.",
-      "Cole a URL mostrada acima e selecione os eventos de compra.",
+      "Cole a URL mostrada acima e marque os eventos de compra: aprovada, recusada, reembolso, chargeback, pix gerado e boleto gerado. NÃO marque abandono de checkout.",
       "Copie o segredo e cole no campo abaixo.",
       "No link do checkout, envie utm_content=<ad_id>.",
     ],
     caveats: [
-      "NÃO CONFIRMADO: o exemplo recebido é uma LISTA da API (results[]), não o corpo do webhook — o envelope real pode diferir. Lemos tanto results.0.* quanto a raiz.",
-      "NÃO CONFIRMADO: o header de autenticação. A primeira venda revela pelo log do 401.",
-      "Valor em reais (decimal, ex.: \"34.35\").",
+      "Estrutura tirada da documentação oficial da Cakto ({ secret, event, data }); falta confirmar contra uma venda real.",
+      "Order bump chega como pedido separado (offer_type = orderbump, com parent_order): o valor soma no faturamento, mas não conta como venda nova.",
+      "Valor em reais (decimal, ex.: 5.55).",
     ],
+    // Carrinho abandonado não é venda — gravá-lo inflaria os pendentes.
+    ignoreEvents: ["checkout_abandonment", "abandon"],
     paths: {
-      transaction: ["id", "refId", "results.0.id", "data.id"],
-      status: ["status", "results.0.status", "data.status"],
-      value: ["amount", "results.0.amount", "data.amount"],
-      currency: ["currency", "results.0.currency"],
-      email: ["customer.email", "results.0.customer.email", "data.customer.email"],
-      phone: ["customer.phone", "results.0.customer.phone"],
-      product: ["product.name", "results.0.product.name", "data.product.name"],
-      adId: [
-        "utm_content",
-        "results.0.utm_content",
-        "sck",
-        "results.0.sck",
-      ],
-      userId: ["sck", "results.0.sck"],
-      utmSource: ["utm_source", "results.0.utm_source"],
-      utmMedium: ["utm_medium", "results.0.utm_medium"],
-      utmCampaign: ["utm_campaign", "results.0.utm_campaign"],
-      utmTerm: ["utm_term", "results.0.utm_term"],
-      utmContent: ["utm_content", "results.0.utm_content"],
-      geoCountry: ["address.country", "results.0.address.country"],
-      geoRegion: ["address.state", "results.0.address.state"],
-      geoCity: ["address.city", "results.0.address.city"],
+      transaction: ["data.id", "data.refId", "id", "results.0.id"],
+      status: ["data.status", "status", "results.0.status"],
+      event: ["event"],
+      value: ["data.amount", "amount", "results.0.amount"],
+      currency: ["data.currency", "currency"],
+      email: ["data.customer.email", "customer.email", "results.0.customer.email"],
+      phone: ["data.customer.phone", "customer.phone"],
+      product: ["data.product.name", "product.name", "results.0.product.name"],
+      adId: ["data.utm_content", "data.sck", "utm_content", "sck"],
+      userId: ["data.sck", "sck"],
+      utmSource: ["data.utm_source", "utm_source"],
+      utmMedium: ["data.utm_medium", "utm_medium"],
+      utmCampaign: ["data.utm_campaign", "utm_campaign"],
+      utmTerm: ["data.utm_term", "utm_term"],
+      utmContent: ["data.utm_content", "utm_content"],
+      geoCountry: ["data.customer.address.country", "data.address.country", "address.country"],
+      geoRegion: ["data.customer.address.state", "data.address.state", "address.state"],
+      geoCity: ["data.customer.address.city", "data.address.city", "address.city"],
+      offerType: ["data.offer_type"],
+      parentOrder: ["data.parent_order"],
     },
-    statusMap: { ...COMMON_STATUS },
+    statusMap: {
+      ...COMMON_STATUS,
+      // Status da Cakto que o substring comum não pega (ex.: CHARGEDBACK não
+      // contém CHARGEBACK).
+      CHARGEDBACK: "chargeback",
+      IN_PROTEST: "chargeback",
+      REFUND_REQUESTED: "refunded",
+      PARTIALLY_PAID: "pending",
+      SCHEDULED: "pending",
+      IN_SETTLEMENT: "approved",
+      BLOCKED: "canceled",
+    },
   },
 
   /* -------------------------------------------------------------- GREENN */

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { isPrimarySale } from "@/lib/sales";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -34,7 +35,7 @@ export async function getLastClickByAd(
     const [purchases, events] = await Promise.all([
       supabase
         .from("purchases")
-        .select("ad_id, valor")
+        .select("ad_id, valor, order_role, parent_order")
         .eq("area_id", areaId)
         .eq("status", "approved")
         .not("ad_id", "is", null)
@@ -56,7 +57,8 @@ export async function getLastClickByAd(
       const adId = row.ad_id as string | null;
       if (!adId) continue;
       const entry = map.get(adId) ?? emptyRow();
-      entry.sales += 1;
+      // Order bump soma no faturamento do anúncio, mas não é venda nova.
+      if (isPrimarySale(row)) entry.sales += 1;
       entry.revenue += Number(row.valor) || 0;
       map.set(adId, entry);
     }
