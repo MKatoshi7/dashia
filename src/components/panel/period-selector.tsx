@@ -6,7 +6,22 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Input } from "@/components/ui/input";
-import { PERIOD_OPTIONS, type PeriodKey } from "@/lib/period";
+import {
+  PERIOD_COOKIE,
+  PERIOD_OPTIONS,
+  PERIOD_PARAMS,
+  type PeriodKey,
+} from "@/lib/period";
+
+/** Lembra o período escolhido (1 ano) — o proxy o reaplica nas outras abas. */
+function rememberPeriod(params: URLSearchParams) {
+  const saved = new URLSearchParams();
+  for (const key of PERIOD_PARAMS) {
+    const value = params.get(key);
+    if (value) saved.set(key, value);
+  }
+  document.cookie = `${PERIOD_COOKIE}=${encodeURIComponent(saved.toString())}; path=/; max-age=31536000; samesite=lax`;
+}
 
 /**
  * Seletor de período do header — filtra TODO o painel.
@@ -32,6 +47,7 @@ export function PeriodSelector() {
       if (v === null) params.delete(k);
       else params.set(k, v);
     }
+    rememberPeriod(params);
     startTransition(() => router.push(`${pathname}?${params.toString()}`));
   }
 

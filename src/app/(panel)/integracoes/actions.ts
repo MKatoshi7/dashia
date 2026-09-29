@@ -60,6 +60,7 @@ async function audit(
 const SettingsSchema = z.object({
   currency: z.string().trim().length(3, "Use o código de 3 letras (ex.: BRL)."),
   tax_rate: z.coerce.number().min(0).max(100),
+  meta_tax_rate: z.coerce.number().min(0).max(99.99),
   revenue_goal: z.coerce.number().min(0),
   allowed_origins: z.string(),
 });
@@ -74,6 +75,7 @@ export async function saveSettings(
   const parsed = SettingsSchema.safeParse({
     currency: formData.get("currency"),
     tax_rate: formData.get("tax_rate"),
+    meta_tax_rate: formData.get("meta_tax_rate"),
     revenue_goal: formData.get("revenue_goal"),
     allowed_origins: formData.get("allowed_origins") ?? "",
   });
@@ -94,6 +96,7 @@ export async function saveSettings(
     .update({
       currency: parsed.data.currency.toUpperCase(),
       tax_rate: parsed.data.tax_rate,
+      meta_tax_rate: parsed.data.meta_tax_rate,
       revenue_goal: parsed.data.revenue_goal,
       allowed_origins: origins,
     })
@@ -104,11 +107,41 @@ export async function saveSettings(
   await audit(ctx.area.id, ctx.user.email, "config.settings", {
     currency: parsed.data.currency,
     tax_rate: parsed.data.tax_rate,
+    meta_tax_rate: parsed.data.meta_tax_rate,
     origins: origins.length,
   });
 
   revalidatePath("/integracoes");
   return { ok: "Preferências salvas." };
+}
+
+/* ------------------------------------------------ versão do dashboard */
+
+export async function saveDashboardVersion(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const ctx = await requireArea();
+  if ("error" in ctx) return { error: ctx.error };
+
+  const version = formData.get("dashboard_version");
+  if (version !== "legacy" && version !== "v2") {
+    return { error: "Versão inválida." };
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("settings")
+    .update({ dashboard_version: version })
+    .eq("area_id", ctx.area.id);
+
+  if (error) return { error: `Falha ao salvar: ${error.message}` };
+
+  await audit(ctx.area.id, ctx.user.email, "config.dashboard", { version });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/configuracoes");
+  return { ok: version === "v2" ? "Dashboard V2 ativado." : "Dashboard Legacy ativado." };
 }
 
 /* ------------------------------------------------- segredos de webhook */

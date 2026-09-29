@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from "@/lib/env";
+import { PERIOD_COOKIE, PERIOD_PARAMS } from "@/lib/period";
 
 /**
  * Next.js 16: `middleware` foi renomeado para `proxy` (runtime nodejs, sem edge).
@@ -68,6 +69,34 @@ export async function proxy(request: NextRequest) {
     url.pathname = "/dashboard";
     url.search = "";
     return NextResponse.redirect(url);
+  }
+
+  // Período lembrado: página do painel aberta SEM período na URL (troca de aba,
+  // recarregar, link do menu) volta para o último período escolhido.
+  const saved = request.cookies.get(PERIOD_COOKIE)?.value;
+  if (
+    user &&
+    saved &&
+    request.method === "GET" &&
+    !isPublic(pathname) &&
+    !request.headers.has("next-action") &&
+    !request.nextUrl.searchParams.has("period")
+  ) {
+    const remembered = new URLSearchParams(decodeURIComponent(saved));
+    const period = remembered.get("period");
+    if (period) {
+      const url = request.nextUrl.clone();
+      for (const key of PERIOD_PARAMS) {
+        const value = remembered.get(key);
+        if (value) url.searchParams.set(key, value);
+      }
+      const redirect = NextResponse.redirect(url);
+      // Preserva os cookies de sessão renovados neste mesmo request.
+      supabaseResponse.cookies
+        .getAll()
+        .forEach((cookie) => redirect.cookies.set(cookie));
+      return redirect;
+    }
   }
 
   return supabaseResponse;

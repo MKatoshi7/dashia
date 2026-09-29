@@ -34,11 +34,13 @@ function Feedback({ state }: { state: FormState }) {
 export function SettingsForm({
   currency,
   taxRate,
+  metaTaxRate,
   revenueGoal,
   allowedOrigins,
 }: {
   currency: string;
   taxRate: number;
+  metaTaxRate: number;
   revenueGoal: number;
   allowedOrigins: string[];
 }) {
@@ -49,7 +51,7 @@ export function SettingsForm({
 
   return (
     <form action={formAction} className="space-y-4 p-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <Label htmlFor="currency">Moeda</Label>
           <Input
@@ -70,6 +72,19 @@ export function SettingsForm({
             min="0"
             max="100"
             defaultValue={taxRate}
+            required
+          />
+        </div>
+        <div>
+          <Label htmlFor="meta_tax_rate">Imposto Meta Ads (%)</Label>
+          <Input
+            id="meta_tax_rate"
+            name="meta_tax_rate"
+            type="number"
+            step="0.01"
+            min="0"
+            max="99.99"
+            defaultValue={metaTaxRate}
             required
           />
         </div>

@@ -206,3 +206,111 @@ export function mergeDailySpend(
     spend: dailySpend[point.date] ?? 0,
   }));
 }
+
+/* ------------------------------------------------ checkout (Dashboard V2) */
+
+export type PaymentMethod = "pix" | "cartao" | "boleto" | "outros";
+
+export type PaymentStats = {
+  /** Vendas iniciadas no checkout (todos os status). */
+  total: number;
+  approved: number;
+  approvedValue: number;
+};
+
+export type CheckoutBreakdown = {
+  /** Existe ao menos uma compra vinda do webhook no período? */
+  hasData: boolean;
+  byMethod: Record<PaymentMethod, PaymentStats>;
+  pendingValue: number;
+  /** Reembolsos + chargebacks. */
+  returnedValue: number;
+};
+
+/**
+ * Onde cada plataforma costuma mandar o método de pagamento. Lido direto do
+ * `raw_webhook` (via caminho JSON do PostgREST), sem coluna própria: um caminho
+ * errado aqui só deixa a venda em "outros", nunca perde dado.
+ */
+const PAYMENT_PATHS = [
+  "raw_webhook->data->purchase->payment->>type", // Hotmart
+  "raw_webhook->>payment_method", // Kiwify / Kirvano
+  "raw_webhook->data->>paymentMethod", // Cakto
+  "raw_webhook->>paymentMethod",
+  "raw_webhook->data->>payment_method",
+  "raw_webhook->payment->>method",
+];
+
+export function normalizePaymentMethod(value: unknown): PaymentMethod {
+  const v = String(value ?? "").toLowerCase();
+  if (!v) return "outros";
+  if (v.includes("pix")) return "pix";
+  if (/(card|credit|cartao|cartão|credito|crédito)/.test(v)) return "cartao";
+  if (/(billet|boleto|bank_slip|ticket)/.test(v)) return "boleto";
+  return "outros";
+}
+
+function emptyPaymentStats(): Record<PaymentMethod, PaymentStats> {
+  const blank = () => ({ total: 0, approved: 0, approvedValue: 0 });
+  return { pix: blank(), cartao: blank(), boleto: blank(), outros: blank() };
+}
+
+export async function getCheckoutBreakdown(
+  areaId: string,
+  from: Date,
+  to: Date,
+): Promise<CheckoutBreakdown> {
+  const result: CheckoutBreakdown = {
+    hasData: false,
+    byMethod: emptyPaymentStats(),
+    pendingValue: 0,
+    returnedValue: 0,
+  };
+
+  try {
+    const supabase = await createClient();
+    const select = [
+      "status",
+      "valor",
+      ...PAYMENT_PATHS.map((path, i) => `pm${i}:${path}`),
+    ].join(", ");
+
+    const { data, error } = await supabase
+      .from("purchases")
+      .select(select)
+      .eq("area_id", areaId)
+      .gte("created_at", from.toISOString())
+      .lte("created_at", to.toISOString())
+      .limit(10_000);
+
+    if (error || !data) return result;
+
+    for (const raw of data as unknown as Record<string, unknown>[]) {
+      result.hasData = true;
+      const value = Number(raw.valor) || 0;
+      const method = normalizePaymentMethod(
+        PAYMENT_PATHS.map((_, i) => raw[`pm${i}`]).find(Boolean),
+      );
+      const stats = result.byMethod[method];
+      stats.total += 1;
+
+      switch (raw.status) {
+        case "approved":
+          stats.approved += 1;
+          stats.approvedValue += value;
+          break;
+        case "pending":
+          result.pendingValue += value;
+          break;
+        case "refunded":
+        case "chargeback":
+          result.returnedValue += value;
+          break;
+      }
+    }
+  } catch {
+    // Mantém o resultado vazio: o card mostra N/A em vez de derrubar a página.
+  }
+
+  return result;
+}

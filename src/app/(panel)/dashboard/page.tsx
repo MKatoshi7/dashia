@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Metadata } from "next";
 
+import { DashboardV2 } from "@/components/panel/dashboard-v2/dashboard-v2";
 import { KpiCard } from "@/components/panel/kpi-card";
 import { RealtimeSales } from "@/components/panel/realtime-sales";
 import { RegionBreakdown } from "@/components/panel/region-breakdown";
@@ -47,6 +48,17 @@ export default async function DashboardPage({
           Crie uma área no seletor do topo da sidebar para ver o dashboard.
         </p>
       </Card>
+    );
+  }
+
+  // Layout escolhido em Configurações → Dashboard.
+  if (settings?.dashboard_version === "v2") {
+    return (
+      <DashboardV2
+        areaId={activeArea.id}
+        period={period}
+        settings={{ ...DEFAULT_SETTINGS, ...settings }}
+      />
     );
   }
 

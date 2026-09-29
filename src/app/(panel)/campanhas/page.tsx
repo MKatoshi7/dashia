@@ -51,7 +51,9 @@ export default async function CampanhasPage({
 
   const level = (LEVELS.find((l) => l.key === params.level)?.key ??
     "campaign") as MetaLevel;
-  const attribution = params.attr === "meta" ? "meta" : "lastclick";
+  // Padrão: vendas do Gerenciador (pixel/rastreamento avançado da Meta). O
+  // Last Click (webhook do checkout) continua a um clique no toggle.
+  const attribution = params.attr === "lastclick" ? "lastclick" : "meta";
 
   const activeArea = await getActiveArea();
   if (!activeArea) {
@@ -210,22 +212,11 @@ export default async function CampanhasPage({
         <div className="flex items-center gap-2">
           <div
             className="group relative"
-            title="Last Click: vendas dos seus webhooks casadas por ad_id. Vendas na Meta: o que o gerenciador reporta pelo modelo de atribuição dele. Os dois NUNCA são somados."
+            title="Vendas na Meta: o que o Gerenciador reporta (pixel). Last Click: vendas do webhook do checkout casadas por ad_id. Os dois NUNCA são somados."
           >
             <Info className="size-4 text-muted-foreground" />
           </div>
           <nav className="flex gap-1 rounded-lg border border-border bg-[hsl(var(--muted)/0.4)] p-1">
-            <Link
-              href={buildHref(params, { attr: "lastclick" })}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-xs transition-colors",
-                attribution === "lastclick"
-                  ? "bg-[hsl(var(--primary)/0.15)] font-medium text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              Atribuição Last Click
-            </Link>
             <Link
               href={buildHref(params, { attr: "meta" })}
               className={cn(
@@ -236,6 +227,17 @@ export default async function CampanhasPage({
               )}
             >
               Vendas na Meta
+            </Link>
+            <Link
+              href={buildHref(params, { attr: "lastclick" })}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs transition-colors",
+                attribution === "lastclick"
+                  ? "bg-[hsl(var(--primary)/0.15)] font-medium text-primary"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              Atribuição Last Click
             </Link>
           </nav>
         </div>

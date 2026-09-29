@@ -72,7 +72,7 @@ function centsToAmount(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed / 100 : null;
 }
 
-async function metaFetch(
+export async function metaFetch(
   url: string,
   cacheSeconds: number,
 ): Promise<{ data: unknown[]; error: string | null }> {

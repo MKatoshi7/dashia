@@ -757,6 +757,37 @@ grant execute on function public.log_event(
 ) to service_role;
 
 -- ---------------------------------------------------------------------
+-- 20260929120000_dashboard_prefs.sql
+-- ---------------------------------------------------------------------
+-- =============================================================================
+-- Preferências do Dashboard (por área)
+-- =============================================================================
+-- dashboard_version: qual layout o /dashboard mostra — 'legacy' (o original)
+--   ou 'v2' (grade de KPIs, funil da Meta, vendas por hora/dia/posicionamento).
+-- meta_tax_rate: imposto que a Meta cobra sobre o gasto com anúncios no Brasil
+--   (PIS/COFINS + ISS = 12,15%, calculado "por dentro": o valor cobrado é
+--   gasto × taxa / (1 − taxa)). 0 desliga o cálculo.
+--
+-- Idempotente: pode rodar de novo sem erro.
+-- =============================================================================
+
+alter table public.settings
+  add column if not exists dashboard_version text not null default 'legacy',
+  add column if not exists meta_tax_rate numeric(5,2) not null default 12.15;
+
+alter table public.settings
+  drop constraint if exists settings_dashboard_version_check;
+alter table public.settings
+  add constraint settings_dashboard_version_check
+    check (dashboard_version in ('legacy', 'v2'));
+
+alter table public.settings
+  drop constraint if exists settings_meta_tax_rate_check;
+alter table public.settings
+  add constraint settings_meta_tax_rate_check
+    check (meta_tax_rate >= 0 and meta_tax_rate < 100);
+
+-- ---------------------------------------------------------------------
 -- Histórico de migrations: faz um futuro `supabase db push` saber que
 -- estas já foram aplicadas, evitando reaplicar tudo por cima.
 -- ---------------------------------------------------------------------
@@ -774,7 +805,8 @@ insert into supabase_migrations.schema_migrations (version, name) values
   ('20260722120000', 'capture'),
   ('20260722130000', 'realtime'),
   ('20260722140000', 'checkout_platforms'),
-  ('20260725120000', 'function_grants_lockdown')
+  ('20260725120000', 'function_grants_lockdown'),
+  ('20260929120000', 'dashboard_prefs')
 on conflict (version) do nothing;
 
 commit;

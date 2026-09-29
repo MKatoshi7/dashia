@@ -6,11 +6,12 @@ import { SettingsForm } from "@/app/(panel)/integracoes/integration-forms";
 import { Card } from "@/components/ui/card";
 import { getActiveArea, getAreas } from "@/lib/areas";
 import { getBranding } from "@/lib/branding";
-import { DEFAULT_SETTINGS } from "@/lib/settings";
-import { createClient } from "@/lib/supabase/server";
+import { DEFAULT_SETTINGS, getSettings } from "@/lib/settings";
 
 import { AreasManager } from "./areas-manager";
 import { BrandingForm } from "./branding-form";
+import { DashboardVersionForm } from "./dashboard-version-form";
+import { PasswordForm } from "./password-form";
 
 export const metadata: Metadata = { title: "Configurações" };
 export const dynamic = "force-dynamic";
@@ -22,14 +23,7 @@ export default async function ConfiguracoesPage() {
     getBranding(),
   ]);
 
-  const supabase = await createClient();
-  const { data: settings } = activeArea
-    ? await supabase
-        .from("settings")
-        .select("currency, tax_rate, revenue_goal, allowed_origins")
-        .eq("area_id", activeArea.id)
-        .maybeSingle()
-    : { data: null };
+  const settings = activeArea ? await getSettings(activeArea.id) : null;
 
   return (
     <div className="space-y-6">
@@ -52,6 +46,41 @@ export default async function ConfiguracoesPage() {
               Nenhuma área ainda. Use “Nova área” no topo da sidebar.
             </div>
           )}
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Dashboard</h2>
+          <p className="text-sm text-muted-foreground">
+            Qual layout o Dashboard mostra na área{" "}
+            <strong>{activeArea?.nome ?? "ativa"}</strong>.
+          </p>
+        </div>
+
+        <Card>
+          {activeArea ? (
+            <DashboardVersionForm
+              current={settings?.dashboard_version ?? DEFAULT_SETTINGS.dashboard_version}
+            />
+          ) : (
+            <p className="p-5 text-sm text-muted-foreground">
+              Crie uma área para escolher o dashboard.
+            </p>
+          )}
+        </Card>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Minha senha</h2>
+          <p className="text-sm text-muted-foreground">
+            Troca a senha da conta com que você está logado.
+          </p>
+        </div>
+
+        <Card>
+          <PasswordForm />
         </Card>
       </div>
 
@@ -93,6 +122,9 @@ export default async function ConfiguracoesPage() {
             <SettingsForm
               currency={(settings?.currency as string) ?? DEFAULT_SETTINGS.currency}
               taxRate={Number(settings?.tax_rate ?? DEFAULT_SETTINGS.tax_rate)}
+              metaTaxRate={Number(
+                settings?.meta_tax_rate ?? DEFAULT_SETTINGS.meta_tax_rate,
+              )}
               revenueGoal={Number(
                 settings?.revenue_goal ?? DEFAULT_SETTINGS.revenue_goal,
               )}

@@ -4,6 +4,14 @@
  * fica disponível nos Server Components.
  */
 
+/**
+ * Cookie com o último período escolhido (querystring: period/from/to). O proxy
+ * o reaplica quando uma página do painel abre sem período na URL — assim trocar
+ * de aba ou recarregar não volta para os 7 dias.
+ */
+export const PERIOD_COOKIE = "panel_period";
+export const PERIOD_PARAMS = ["period", "from", "to"] as const;
+
 export type PeriodKey = "today" | "yesterday" | "7d" | "30d" | "custom";
 
 export const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
