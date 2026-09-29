@@ -2,13 +2,12 @@ import "server-only";
 
 import { cache } from "react";
 
+import { DEFAULT_FUNNEL, normalizeFunnel, type FunnelMetric } from "@/lib/funnel";
 import { createClient } from "@/lib/supabase/server";
 
 /**
- * Settings da área (uma linha por área).
- * ATENÇÃO: nunca selecionar aqui as colunas de segredo (hotmart_hottok,
- * kiwify_webhook_token) — elas só são lidas/decifradas no servidor, nas rotas
- * que realmente precisam (Fase 4/7).
+ * Settings da área (uma linha por área). Não guarda segredos: os de webhook
+ * vivem em `checkout_integrations`, cifrados.
  */
 export type DashboardVersion = "legacy" | "v2";
 
@@ -21,6 +20,8 @@ export type Settings = {
   dashboard_version: DashboardVersion;
   /** Imposto da Meta sobre o gasto (%), calculado "por dentro". */
   meta_tax_rate: number;
+  /** Métricas das etapas do funil do Dashboard V2, na ordem. */
+  dashboard_funnel: FunnelMetric[];
 };
 
 export const DEFAULT_SETTINGS: Omit<Settings, "area_id"> = {
@@ -30,41 +31,33 @@ export const DEFAULT_SETTINGS: Omit<Settings, "area_id"> = {
   allowed_origins: [],
   dashboard_version: "legacy",
   meta_tax_rate: 12.15,
+  dashboard_funnel: DEFAULT_FUNNEL,
 };
-
-const BASE_COLUMNS = "area_id, currency, tax_rate, revenue_goal, allowed_origins";
 
 export const getSettings = cache(
   async (areaId: string): Promise<Settings | null> => {
     try {
       const supabase = await createClient();
-      const full = await supabase
+      // `*` de propósito: colunas de migrations ainda não aplicadas
+      // simplesmente não vêm, e caem no default abaixo — sem erro 42703.
+      const { data, error } = await supabase
         .from("settings")
-        .select(`${BASE_COLUMNS}, dashboard_version, meta_tax_rate`)
+        .select("*")
         .eq("area_id", areaId)
         .maybeSingle();
 
-      // 42703 = coluna inexistente: a migration dashboard_prefs ainda não foi
-      // aplicada. Cai para as colunas antigas em vez de zerar a área inteira.
-      if (full.error?.code === "42703") {
-        const base = await supabase
-          .from("settings")
-          .select(BASE_COLUMNS)
-          .eq("area_id", areaId)
-          .maybeSingle();
-        if (base.error || !base.data) return null;
-        return {
-          ...DEFAULT_SETTINGS,
-          ...(base.data as Omit<Settings, "dashboard_version" | "meta_tax_rate">),
-        };
-      }
+      if (error || !data) return null;
+      const row = data as Partial<Settings> & { area_id: string };
 
-      if (full.error || !full.data) return null;
-      const data = full.data as Settings;
       return {
-        ...data,
-        dashboard_version: data.dashboard_version === "v2" ? "v2" : "legacy",
-        meta_tax_rate: Number(data.meta_tax_rate ?? DEFAULT_SETTINGS.meta_tax_rate),
+        area_id: row.area_id,
+        currency: row.currency ?? DEFAULT_SETTINGS.currency,
+        tax_rate: Number(row.tax_rate ?? DEFAULT_SETTINGS.tax_rate),
+        revenue_goal: Number(row.revenue_goal ?? DEFAULT_SETTINGS.revenue_goal),
+        allowed_origins: row.allowed_origins ?? [],
+        dashboard_version: row.dashboard_version === "v2" ? "v2" : "legacy",
+        meta_tax_rate: Number(row.meta_tax_rate ?? DEFAULT_SETTINGS.meta_tax_rate),
+        dashboard_funnel: normalizeFunnel(row.dashboard_funnel),
       };
     } catch {
       return null;

@@ -4,6 +4,7 @@ import { decryptSecret } from "@/lib/crypto";
 import { rateLimit } from "@/lib/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { getLiveRate } from "./fx";
 import {
   META_CACHE,
   META_GRAPH_BASE,
@@ -47,6 +48,12 @@ export type AdAccount = {
   label: string;
   ad_account_id: string;
   ads_token: string | null;
+  /** Moeda da conta na Meta (ISO). */
+  currency: string;
+  /** Multiplicador para a moeda da área (1 quando é a mesma). */
+  rate: number;
+  /** Preenchido quando a cotação não pôde ser obtida (rate fica 1). */
+  rateError: string | null;
 };
 
 export function toYmd(date: Date): string {
@@ -108,18 +115,37 @@ export const LANDING_PAGE_VIEW_ACTIONS = [
   "omni_landing_page_view",
 ];
 
-/** Contas de anúncio da área, com o ads_token já decifrado. SOMENTE no servidor. */
+/**
+ * Contas de anúncio da área, com o ads_token já decifrado e a cotação para a
+ * moeda da área já resolvida (`rate`). SOMENTE no servidor.
+ *
+ * Todo valor MONETÁRIO lido da Meta (gasto, valor de compra) deve ser
+ * multiplicado por `rate` antes de ir para a tela — é o que faz uma conta em
+ * USD aparecer em R$ ao lado de uma conta em BRL. Orçamento é exceção: volta
+ * para a Meta, então fica na moeda da conta.
+ */
 export async function getAdAccounts(areaId: string): Promise<AdAccount[]> {
   const admin = createAdminClient();
+
+  // `*` de propósito: antes da migration account_currency_funnel, currency e
+  // fx_rate não vêm e a conta é tratada na moeda da área (sem erro 42703).
   const { data, error } = await admin
     .from("meta_ad_accounts")
-    .select("id, label, ad_account_id, ads_token")
+    .select("*")
     .eq("area_id", areaId);
 
   if (error || !data) return [];
 
+  const { data: settings } = await admin
+    .from("settings")
+    .select("currency")
+    .eq("area_id", areaId)
+    .maybeSingle();
+  const areaCurrency = String(settings?.currency ?? "BRL").toUpperCase();
+
   const accounts = await Promise.all(
-    data.map(async (row) => {
+    data.map(async (raw) => {
+      const row = raw as Record<string, unknown>;
       const cipher = row.ads_token as string | null;
       let token: string | null = null;
       if (cipher) {
@@ -129,7 +155,37 @@ export async function getAdAccounts(areaId: string): Promise<AdAccount[]> {
           console.error("[meta] falha ao decifrar ads_token:", err);
         }
       }
-      return { ...row, ads_token: token } as AdAccount;
+
+      const currency =
+        typeof row.currency === "string" && row.currency
+          ? row.currency.toUpperCase()
+          : areaCurrency;
+      const fixed = Number(row.fx_rate);
+
+      let rate = 1;
+      let rateError: string | null = null;
+      if (currency !== areaCurrency) {
+        if (Number.isFinite(fixed) && fixed > 0) {
+          rate = fixed;
+        } else {
+          const live = await getLiveRate(currency, areaCurrency);
+          if (live) {
+            rate = live;
+          } else {
+            rateError = `cotação ${currency}→${areaCurrency} indisponível; valores exibidos em ${currency}. Fixe a cotação em Integrações.`;
+          }
+        }
+      }
+
+      return {
+        id: row.id as string,
+        label: row.label as string,
+        ad_account_id: row.ad_account_id as string,
+        ads_token: token,
+        currency,
+        rate,
+        rateError,
+      } satisfies AdAccount;
     }),
   );
 
@@ -170,6 +226,7 @@ export async function getAreaInsights(
       errors.push(`${account.label}: token não configurado`);
       continue;
     }
+    if (account.rateError) errors.push(`${account.label}: ${account.rateError}`);
 
     // Rate limit conservador por conta.
     const allowed = await rateLimit(
@@ -211,13 +268,15 @@ export async function getAreaInsights(
 
       for (const row of payload.data ?? []) {
         const r = row as Record<string, unknown>;
-        const spend = Number(r.spend) || 0;
+        // Valores monetários convertidos para a moeda da área.
+        const spend = (Number(r.spend) || 0) * account.rate;
 
         totals.spend += spend;
         totals.impressions += Number(r.impressions) || 0;
         totals.clicks += Number(r.clicks) || 0;
         totals.metaPurchases += sumActions(r.actions, "purchase");
-        totals.metaRevenue += sumActions(r.action_values, "purchase");
+        totals.metaRevenue +=
+          sumActions(r.action_values, "purchase") * account.rate;
 
         // Com time_increment=1 cada linha traz date_start (YYYY-MM-DD).
         const day = typeof r.date_start === "string" ? r.date_start : null;

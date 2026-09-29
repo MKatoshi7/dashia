@@ -35,6 +35,8 @@ export type TableRow = {
   effectiveStatus: string;
   budgetAmount: number | null;
   budgetType: "daily" | "lifetime" | null;
+  /** Moeda da conta — o orçamento não é convertido (volta para a Meta). */
+  budgetCurrency: string;
   accountId: string;
   accountLabel: string;
   spend: number;
@@ -89,9 +91,18 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
 
 const PAGE_SIZE = 25;
 
-/** Vermelho para valores negativos (lucro). */
-function negative(value: number) {
-  return value < 0 ? "text-destructive" : "";
+/** Lucro: vermelho quando negativo, verde quando positivo. */
+function profitTone(value: number) {
+  if (value < 0) return "text-destructive";
+  if (value > 0) return "text-emerald";
+  return "";
+}
+
+/** ROAS: verde a partir de 1 (pagou o gasto), vermelho entre 0 e 1. */
+function roasTone(value: number) {
+  if (value >= 1) return "text-emerald";
+  if (value > 0) return "text-destructive";
+  return "";
 }
 
 export function CampaignsTable({
@@ -232,7 +243,7 @@ export function CampaignsTable({
                       <p className="truncate font-mono text-[0.65rem] text-muted-foreground">
                         {row.accountLabel}
                         {row.budgetAmount !== null
-                          ? ` · ${formatCurrency(row.budgetAmount, currency)}${row.budgetType === "daily" ? "/dia" : " total"}`
+                          ? ` · ${formatCurrency(row.budgetAmount, row.budgetCurrency)}${row.budgetType === "daily" ? "/dia" : " total"}`
                           : ""}
                       </p>
                     </div>
@@ -243,10 +254,10 @@ export function CampaignsTable({
                 <Num className="sensitive">
                   {formatCurrency(row.revenue, currency)}
                 </Num>
-                <Num className={cn("sensitive", negative(row.profit))}>
+                <Num className={cn("sensitive", profitTone(row.profit))}>
                   {formatCurrency(row.profit, currency)}
                 </Num>
-                <Num className={negative(row.roas > 0 && row.roas < 1 ? -1 : 0)}>
+                <Num className={roasTone(row.roas)}>
                   {formatRoas(row.roas)}
                 </Num>
                 <Num>{formatNumber(row.checkouts)}</Num>
@@ -260,7 +271,7 @@ export function CampaignsTable({
 
                 {canEdit ? (
                   <td className="px-3 py-2">
-                    <RowActions row={row} currency={currency} />
+                    <RowActions row={row} />
                   </td>
                 ) : null}
               </tr>
@@ -277,10 +288,10 @@ export function CampaignsTable({
               <Num className="sensitive">
                 {formatCurrency(totals.revenue, currency)}
               </Num>
-              <Num className={cn("sensitive", negative(totals.profit))}>
+              <Num className={cn("sensitive", profitTone(totals.profit))}>
                 {formatCurrency(totals.profit, currency)}
               </Num>
-              <Num>{formatRoas(totals.roas)}</Num>
+              <Num className={roasTone(totals.roas)}>{formatRoas(totals.roas)}</Num>
               <Num>{formatNumber(totals.checkouts)}</Num>
               <Num className="sensitive">{formatCurrency(totals.cpa, currency)}</Num>
               <Num>{formatNumber(totals.impressions)}</Num>
@@ -358,13 +369,13 @@ function StatusDot({ status }: { status: string }) {
 
 /* --------------------------------------------------------- edição inline */
 
-function RowActions({ row, currency }: { row: TableRow; currency: string }) {
+function RowActions({ row }: { row: TableRow }) {
   const isActive = row.status.toUpperCase() === "ACTIVE";
 
   return (
     <div className="flex justify-end gap-1">
       <StatusDialog row={row} isActive={isActive} />
-      <BudgetDialog row={row} currency={currency} />
+      <BudgetDialog row={row} />
     </div>
   );
 }
@@ -444,7 +455,8 @@ function StatusDialog({ row, isActive }: { row: TableRow; isActive: boolean }) {
 }
 
 /** Edição de orçamento — também com confirmação explícita. */
-function BudgetDialog({ row, currency }: { row: TableRow; currency: string }) {
+/** O orçamento fica na moeda da CONTA: é o valor que vai para a Meta. */
+function BudgetDialog({ row }: { row: TableRow }) {
   const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<MetaWriteState, FormData>(
     setEntityBudget,
@@ -500,7 +512,7 @@ function BudgetDialog({ row, currency }: { row: TableRow; currency: string }) {
 
             <div>
               <Label htmlFor={`budget-${row.id}`}>
-                Novo orçamento ({currency})
+                Novo orçamento ({row.budgetCurrency})
               </Label>
               <Input
                 id={`budget-${row.id}`}

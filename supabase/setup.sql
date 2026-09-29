@@ -788,6 +788,65 @@ alter table public.settings
     check (meta_tax_rate >= 0 and meta_tax_rate < 100);
 
 -- ---------------------------------------------------------------------
+-- 20260930120000_account_currency_funnel.sql
+-- ---------------------------------------------------------------------
+-- =============================================================================
+-- Moeda por conta de anúncio + funil editável do Dashboard V2
+-- =============================================================================
+-- meta_ad_accounts.currency: moeda da conta na Meta (ISO, ex.: USD). NULL =
+--   mesma moeda da área (sem conversão). Preenchida automaticamente ao conectar.
+-- meta_ad_accounts.fx_rate: cotação FIXA para converter para a moeda da área
+--   (ex.: 5.80 = 1 USD → R$ 5,80). NULL = cotação do dia, automática.
+-- settings.dashboard_funnel: métricas das etapas do funil do Dashboard V2,
+--   na ordem. Chaves válidas vivem em src/lib/meta/dashboard.ts.
+--
+-- Idempotente: pode rodar de novo sem erro.
+-- =============================================================================
+
+alter table public.meta_ad_accounts
+  add column if not exists currency text,
+  add column if not exists fx_rate numeric(14,6);
+
+alter table public.meta_ad_accounts
+  drop constraint if exists meta_ad_accounts_currency_check;
+alter table public.meta_ad_accounts
+  add constraint meta_ad_accounts_currency_check
+    check (currency is null or currency ~ '^[A-Z]{3} faz um futuro `supabase db push` saber que
+-- estas já foram aplicadas, evitando reaplicar tudo por cima.
+-- ---------------------------------------------------------------------
+create schema if not exists supabase_migrations;
+create table if not exists supabase_migrations.schema_migrations (
+  version text primary key,
+  statements text[],
+  name text
+);
+insert into supabase_migrations.schema_migrations (version, name) values
+  ('20260721120000', 'extensions_and_functions'),
+  ('20260721120100', 'tables'),
+  ('20260721120200', 'rate_limit'),
+  ('20260721120300', 'rls'),
+  ('20260722120000', 'capture'),
+  ('20260722130000', 'realtime'),
+  ('20260722140000', 'checkout_platforms'),
+  ('20260725120000', 'function_grants_lockdown'),
+  ('20260929120000', 'dashboard_prefs'),
+  ('20260930120000', 'account_currency_funnel')
+on conflict (version) do nothing;
+
+commit;
+);
+
+alter table public.meta_ad_accounts
+  drop constraint if exists meta_ad_accounts_fx_rate_check;
+alter table public.meta_ad_accounts
+  add constraint meta_ad_accounts_fx_rate_check
+    check (fx_rate is null or fx_rate > 0);
+
+alter table public.settings
+  add column if not exists dashboard_funnel text[] not null
+    default '{link_clicks,landing_views,checkouts,payment_info,purchases}';
+
+-- ---------------------------------------------------------------------
 -- Histórico de migrations: faz um futuro `supabase db push` saber que
 -- estas já foram aplicadas, evitando reaplicar tudo por cima.
 -- ---------------------------------------------------------------------

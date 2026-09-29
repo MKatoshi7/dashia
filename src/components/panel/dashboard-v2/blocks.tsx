@@ -54,7 +54,7 @@ export function StatTile({
     tone === "negative"
       ? "text-destructive"
       : tone === "positive"
-        ? "text-primary"
+        ? "text-emerald"
         : "text-foreground";
 
   return (

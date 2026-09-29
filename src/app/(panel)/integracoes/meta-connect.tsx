@@ -12,6 +12,7 @@ import {
   connectAccounts,
   deleteAdAccount,
   discoverAccounts,
+  saveAccountCurrency,
   type DiscoverState,
   type FormState,
 } from "./actions";
@@ -21,7 +22,79 @@ export type AccountRow = {
   label: string;
   ad_account_id: string;
   hasToken: boolean;
+  /** Moeda da conta na Meta; null = mesma da área. */
+  currency: string | null;
+  /** Cotação fixa; null = automática (cotação do dia). */
+  fxRate: number | null;
 };
+
+const CURRENCIES = ["BRL", "USD", "EUR", "GBP", "ARS", "MXN", "COP", "CLP", "PEN"];
+
+/**
+ * Moeda da conta + cotação. Conta em USD num painel em BRL tem gasto e
+ * faturamento convertidos em Campanhas e no Dashboard.
+ */
+function AccountCurrency({
+  account,
+  areaCurrency,
+}: {
+  account: AccountRow;
+  areaCurrency: string;
+}) {
+  const [state, action, pending] = useActionState<FormState, FormData>(
+    saveAccountCurrency,
+    {},
+  );
+  const current = account.currency ?? areaCurrency;
+  const [currency, setCurrency] = useState(current);
+  const options = CURRENCIES.includes(current) ? CURRENCIES : [current, ...CURRENCIES];
+  const converts = currency !== areaCurrency;
+
+  return (
+    <form action={action} className="flex flex-wrap items-end gap-2 pl-12">
+      <input type="hidden" name="id" value={account.id} />
+      <div>
+        <Label htmlFor={`cur-${account.id}`} className="text-[0.65rem]">
+          Moeda da conta
+        </Label>
+        <select
+          id={`cur-${account.id}`}
+          name="currency"
+          value={currency}
+          onChange={(e) => setCurrency(e.currentTarget.value)}
+          className="h-8 rounded-md border border-border bg-[hsl(var(--muted)/0.5)] px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+        >
+          {options.map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+        </select>
+      </div>
+      {converts ? (
+        <div>
+          <Label htmlFor={`fx-${account.id}`} className="text-[0.65rem]">
+            1 {currency} = ? {areaCurrency}
+          </Label>
+          <Input
+            id={`fx-${account.id}`}
+            name="fx_rate"
+            inputMode="decimal"
+            defaultValue={account.fxRate ?? ""}
+            placeholder="automática (do dia)"
+            className="h-8 w-40 text-xs"
+          />
+        </div>
+      ) : (
+        <input type="hidden" name="fx_rate" value="" />
+      )}
+      <Button type="submit" size="sm" variant="outline" disabled={pending}>
+        {pending ? "Salvando..." : "Salvar"}
+      </Button>
+      <Feedback state={state} />
+    </form>
+  );
+}
 
 function Feedback({ state }: { state: { error?: string; ok?: string } }) {
   if (state.error) {
@@ -36,44 +109,53 @@ function Feedback({ state }: { state: { error?: string; ok?: string } }) {
 }
 
 /** Linha de conta já conectada, com remoção. */
-function ConnectedAccount({ account }: { account: AccountRow }) {
+function ConnectedAccount({
+  account,
+  areaCurrency,
+}: {
+  account: AccountRow;
+  areaCurrency: string;
+}) {
   const [state, action, pending] = useActionState<FormState, FormData>(
     deleteAdAccount,
     {},
   );
 
   return (
-    <li className="list-tile flex items-center gap-3 p-3">
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-[hsl(var(--primary)/0.25)] bg-[hsl(var(--primary)/0.1)] text-primary">
-        <Plug className="size-4" />
-      </span>
-
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium tracking-tight">
-          {account.label}
-        </p>
-        <p className="micro-label truncate">{account.ad_account_id}</p>
-      </div>
-
-      {account.hasToken ? (
-        <span className="micro-label hidden items-center gap-1 text-primary sm:inline-flex">
-          <Check className="size-3" /> token
+    <li className="list-tile space-y-2 p-3">
+      <div className="flex items-center gap-3">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-[hsl(var(--primary)/0.25)] bg-[hsl(var(--primary)/0.1)] text-primary">
+          <Plug className="size-4" />
         </span>
-      ) : null}
 
-      <form action={action}>
-        <input type="hidden" name="id" value={account.id} />
-        <Button
-          type="submit"
-          size="icon"
-          variant="ghost"
-          disabled={pending}
-          aria-label={`Remover ${account.label}`}
-          title={state.error ?? "Remover conta"}
-        >
-          <Trash2 className="size-4" />
-        </Button>
-      </form>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium tracking-tight">
+            {account.label}
+          </p>
+          <p className="micro-label truncate">{account.ad_account_id}</p>
+        </div>
+
+        {account.hasToken ? (
+          <span className="micro-label hidden items-center gap-1 text-primary sm:inline-flex">
+            <Check className="size-3" /> token
+          </span>
+        ) : null}
+
+        <form action={action}>
+          <input type="hidden" name="id" value={account.id} />
+          <Button
+            type="submit"
+            size="icon"
+            variant="ghost"
+            disabled={pending}
+            aria-label={`Remover ${account.label}`}
+            title={state.error ?? "Remover conta"}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        </form>
+      </div>
+      <AccountCurrency account={account} areaCurrency={areaCurrency} />
     </li>
   );
 }
@@ -86,7 +168,13 @@ function ConnectedAccount({ account }: { account: AccountRow }) {
  * Ninguém precisa digitar `act_<id>` na mão. O token nunca volta do servidor:
  * quem o guarda é este campo, que o usuário acabou de preencher.
  */
-export function MetaConnect({ accounts }: { accounts: AccountRow[] }) {
+export function MetaConnect({
+  accounts,
+  areaCurrency,
+}: {
+  accounts: AccountRow[];
+  areaCurrency: string;
+}) {
   const [token, setToken] = useState("");
 
   const [discovery, runDiscover, discovering] = useActionState<
@@ -110,7 +198,11 @@ export function MetaConnect({ accounts }: { accounts: AccountRow[] }) {
           <p className="micro-label mb-2">Contas conectadas</p>
           <ul className="space-y-1">
             {accounts.map((account) => (
-              <ConnectedAccount key={account.id} account={account} />
+              <ConnectedAccount
+                key={account.id}
+                account={account}
+                areaCurrency={areaCurrency}
+              />
             ))}
           </ul>
         </div>

@@ -32,6 +32,8 @@ export type MetaEntity = {
   /** Orçamento na unidade da moeda (a Meta trabalha em centavos). */
   budgetAmount: number | null;
   budgetType: "daily" | "lifetime" | null;
+  /** Moeda do orçamento = moeda da CONTA (ele volta para a Meta sem conversão). */
+  budgetCurrency: string;
   /** Conta interna (meta_ad_accounts.id) e rótulo, para filtro e escrita. */
   accountId: string;
   accountLabel: string;
@@ -172,6 +174,7 @@ export async function getMetaEntities(
       errors.push(`${account.label}: token não configurado`);
       continue;
     }
+    if (account.rateError) errors.push(`${account.label}: ${account.rateError}`);
 
     // Duas chamadas por conta (insights + metadados) — respeitando o limite.
     const allowed = await rateLimit(
@@ -196,7 +199,7 @@ export async function getMetaEntities(
     const idField = LEVEL_ID_FIELD[level];
     const aggregated = new Map<
       string,
-      Omit<MetaEntity, "id" | "name" | "level" | "status" | "effectiveStatus" | "budgetAmount" | "budgetType" | "accountId" | "accountLabel">
+      Omit<MetaEntity, "id" | "name" | "level" | "status" | "effectiveStatus" | "budgetAmount" | "budgetType" | "budgetCurrency" | "accountId" | "accountLabel">
     >();
 
     for (const raw of insights.data) {
@@ -215,11 +218,13 @@ export async function getMetaEntities(
         adIds: [] as string[],
       };
 
-      entry.spend += Number(row.spend) || 0;
+      // Monetários convertidos para a moeda da área (conta em USD → R$).
+      entry.spend += (Number(row.spend) || 0) * account.rate;
       entry.impressions += Number(row.impressions) || 0;
       entry.clicks += Number(row.clicks) || 0;
       entry.metaPurchases += sumActions(row.actions, "purchase");
-      entry.metaRevenue += sumActions(row.action_values, "purchase");
+      entry.metaRevenue +=
+        sumActions(row.action_values, "purchase") * account.rate;
       entry.metaCheckouts += firstActionCount(
         row.actions,
         INITIATE_CHECKOUT_ACTIONS,
@@ -267,6 +272,7 @@ export async function getMetaEntities(
             : "",
         budgetAmount: daily ?? lifetime,
         budgetType: daily ? "daily" : lifetime ? "lifetime" : null,
+        budgetCurrency: account.currency,
         accountId: account.id,
         accountLabel: account.label,
         ...metrics,

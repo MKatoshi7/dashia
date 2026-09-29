@@ -7,13 +7,7 @@ import { getCheckoutBreakdown } from "@/lib/metrics";
 import type { Period } from "@/lib/period";
 import { metaTax, type Settings } from "@/lib/settings";
 
-import {
-  ApprovalRate,
-  BreakdownList,
-  ConversionFunnel,
-  PanelTitle,
-  StatTile,
-} from "./blocks";
+import { ApprovalRate, BreakdownList, PanelTitle, StatTile } from "./blocks";
 import {
   CumulativeChart,
   HourChart,
@@ -21,6 +15,7 @@ import {
   WeekdayChart,
   type CumulativePoint,
 } from "./charts";
+import { EditableFunnel } from "./editable-funnel";
 
 /**
  * Dashboard V2. Vendas e faturamento vêm do Gerenciador (pixel da Meta) — a
@@ -172,19 +167,7 @@ export async function DashboardV2({
       {/* Funil + vendas por pagamento */}
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <PanelTitle
-            title="Funil de Conversão (Meta Ads)"
-            hint="Cliques no link → visualizações da página de destino → finalizações de compra iniciadas → informações de pagamento adicionadas → compras. Percentuais sobre os cliques."
-          />
-          <ConversionFunnel
-            steps={[
-              { label: "Cliques", value: meta.linkClicks },
-              { label: "Vis. Página", value: meta.landingViews },
-              { label: "ICs", value: meta.checkouts },
-              { label: "Vendas Inic.", value: meta.paymentInfo },
-              { label: "Vendas Apr.", value: sales },
-            ]}
-          />
+          <EditableFunnel steps={settings.dashboard_funnel} values={meta.funnel} />
         </Card>
 
         <Card>

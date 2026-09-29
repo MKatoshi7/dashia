@@ -119,6 +119,7 @@ export default async function CampanhasPage({
       effectiveStatus: entity.effectiveStatus,
       budgetAmount: entity.budgetAmount,
       budgetType: entity.budgetType,
+      budgetCurrency: entity.budgetCurrency,
       accountId: entity.accountId,
       accountLabel: entity.accountLabel,
       spend: entity.spend,

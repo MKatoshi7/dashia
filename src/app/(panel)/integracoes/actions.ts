@@ -8,6 +8,11 @@ import { getCurrentUser } from "@/lib/auth";
 import { getPlatform } from "@/lib/checkout/platforms";
 import { encryptSecret } from "@/lib/crypto";
 import {
+  FUNNEL_MAX_STEPS,
+  FUNNEL_MIN_STEPS,
+  isFunnelMetric,
+} from "@/lib/funnel";
+import {
   discoverAdAccounts,
   type DiscoveredAccount,
 } from "@/lib/meta/discover";
@@ -144,6 +149,42 @@ export async function saveDashboardVersion(
   return { ok: version === "v2" ? "Dashboard V2 ativado." : "Dashboard Legacy ativado." };
 }
 
+/* --------------------------------------------- funil do dashboard V2 */
+
+/** Recebe as etapas na ordem (campo `steps` repetido). */
+export async function saveDashboardFunnel(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const ctx = await requireArea();
+  if ("error" in ctx) return { error: ctx.error };
+
+  const raw = formData.getAll("steps").map(String);
+  const steps = [...new Set(raw.filter(isFunnelMetric))];
+
+  if (steps.length !== raw.length) {
+    return { error: "Etapas inválidas ou repetidas." };
+  }
+  if (steps.length < FUNNEL_MIN_STEPS || steps.length > FUNNEL_MAX_STEPS) {
+    return {
+      error: `Use de ${FUNNEL_MIN_STEPS} a ${FUNNEL_MAX_STEPS} etapas.`,
+    };
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("settings")
+    .update({ dashboard_funnel: steps })
+    .eq("area_id", ctx.area.id);
+
+  if (error) return { error: `Falha ao salvar: ${error.message}` };
+
+  await audit(ctx.area.id, ctx.user.email, "config.dashboard_funnel", { steps });
+
+  revalidatePath("/dashboard");
+  return { ok: "Funil salvo." };
+}
+
 /* ------------------------------------------------- segredos de webhook */
 
 /**
@@ -267,13 +308,18 @@ export async function connectAccounts(
   const encrypted = await encryptSecret(token);
   const admin = createAdminClient();
 
-  // Uma linha por conta; o mesmo token cifrado se repete em cada uma.
-  const rows = selected.map((id) => ({
-    area_id: ctx.area.id,
-    label: byId.get(id)?.name ?? id,
-    ad_account_id: id,
-    ads_token: encrypted,
-  }));
+  // Uma linha por conta; o mesmo token cifrado se repete em cada uma. A moeda
+  // vem da própria Meta — é o que permite converter contas em USD para R$.
+  const rows = selected.map((id) => {
+    const currency = byId.get(id)?.currency?.toUpperCase() ?? null;
+    return {
+      area_id: ctx.area.id,
+      label: byId.get(id)?.name ?? id,
+      ad_account_id: id,
+      ads_token: encrypted,
+      ...(currency && /^[A-Z]{3}$/.test(currency) ? { currency } : {}),
+    };
+  });
 
   // Remove as que já existiam para não duplicar ao reconectar.
   await admin
@@ -297,6 +343,59 @@ export async function connectAccounts(
 }
 
 /* ------------------------------------------------ contas de anúncio Meta */
+
+const AccountCurrencySchema = z.object({
+  id: z.string().uuid(),
+  currency: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[A-Z]{3}$/, "Use o código de 3 letras (ex.: USD)."),
+  // Vazio = cotação do dia, automática.
+  fx_rate: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : Number(v.replace(",", "."))))
+    .refine((v) => v === null || (Number.isFinite(v) && v > 0), "Cotação inválida."),
+});
+
+/** Moeda da conta + cotação fixa opcional para a moeda da área. */
+export async function saveAccountCurrency(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const ctx = await requireArea();
+  if ("error" in ctx) return { error: ctx.error };
+
+  const parsed = AccountCurrencySchema.safeParse({
+    id: formData.get("id"),
+    currency: formData.get("currency") ?? "",
+    fx_rate: formData.get("fx_rate") ?? "",
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  }
+
+  const admin = createAdminClient();
+  const { error } = await admin
+    .from("meta_ad_accounts")
+    .update({ currency: parsed.data.currency, fx_rate: parsed.data.fx_rate })
+    .eq("id", parsed.data.id)
+    .eq("area_id", ctx.area.id);
+
+  if (error) return { error: `Falha ao salvar: ${error.message}` };
+
+  await audit(ctx.area.id, ctx.user.email, "config.meta_account_currency", {
+    account: parsed.data.id,
+    currency: parsed.data.currency,
+    fx_rate: parsed.data.fx_rate,
+  });
+
+  revalidatePath("/integracoes");
+  revalidatePath("/campanhas");
+  revalidatePath("/dashboard");
+  return { ok: "Moeda salva." };
+}
 
 const AccountSchema = z.object({
   label: z.string().trim().min(1, "Informe um rótulo."),

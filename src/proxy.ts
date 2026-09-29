@@ -17,6 +17,10 @@ import { PERIOD_COOKIE, PERIOD_PARAMS } from "@/lib/period";
 
 const PUBLIC_PATHS = ["/login", "/setup"];
 
+/** Filtros da tela Campanhas lembrados entre abas (sem a busca por nome). */
+const CAMPAIGN_VIEW_COOKIE = "campaign_view";
+const CAMPAIGN_VIEW_PARAMS = ["status", "attr", "level", "account"] as const;
+
 function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/")) return true;
   return PUBLIC_PATHS.some(
@@ -71,32 +75,70 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Período lembrado: página do painel aberta SEM período na URL (troca de aba,
-  // recarregar, link do menu) volta para o último período escolhido.
-  const saved = request.cookies.get(PERIOD_COOKIE)?.value;
   if (
     user &&
-    saved &&
     request.method === "GET" &&
     !isPublic(pathname) &&
-    !request.headers.has("next-action") &&
-    !request.nextUrl.searchParams.has("period")
+    !request.headers.has("next-action")
   ) {
-    const remembered = new URLSearchParams(decodeURIComponent(saved));
-    const period = remembered.get("period");
-    if (period) {
-      const url = request.nextUrl.clone();
-      for (const key of PERIOD_PARAMS) {
-        const value = remembered.get(key);
-        if (value) url.searchParams.set(key, value);
+    const url = request.nextUrl.clone();
+    let changed = false;
+    let persistView: string | null = null;
+
+    // Período lembrado: página do painel aberta SEM período na URL (troca de
+    // aba, recarregar, link do menu) volta para o último período escolhido.
+    const savedPeriod = request.cookies.get(PERIOD_COOKIE)?.value;
+    if (savedPeriod && !url.searchParams.has("period")) {
+      const remembered = new URLSearchParams(decodeURIComponent(savedPeriod));
+      if (remembered.get("period")) {
+        for (const key of PERIOD_PARAMS) {
+          const value = remembered.get(key);
+          if (value) url.searchParams.set(key, value);
+        }
+        changed = true;
       }
-      const redirect = NextResponse.redirect(url);
+    }
+
+    // Filtros de Campanhas (status, atribuição, nível, conta): com algum na
+    // URL, viram o novo padrão; sem nenhum, volta o último usado.
+    if (pathname === "/campanhas") {
+      const present = CAMPAIGN_VIEW_PARAMS.filter((key) =>
+        url.searchParams.has(key),
+      );
+      if (present.length > 0) {
+        const view = new URLSearchParams();
+        for (const key of present) view.set(key, url.searchParams.get(key)!);
+        persistView = view.toString();
+      } else {
+        const savedView = request.cookies.get(CAMPAIGN_VIEW_COOKIE)?.value;
+        if (savedView) {
+          const remembered = new URLSearchParams(decodeURIComponent(savedView));
+          for (const key of CAMPAIGN_VIEW_PARAMS) {
+            const value = remembered.get(key);
+            if (value) {
+              url.searchParams.set(key, value);
+              changed = true;
+            }
+          }
+        }
+      }
+    }
+
+    const response = changed ? NextResponse.redirect(url) : supabaseResponse;
+    if (changed) {
       // Preserva os cookies de sessão renovados neste mesmo request.
       supabaseResponse.cookies
         .getAll()
-        .forEach((cookie) => redirect.cookies.set(cookie));
-      return redirect;
+        .forEach((cookie) => response.cookies.set(cookie));
     }
+    if (persistView !== null) {
+      response.cookies.set(CAMPAIGN_VIEW_COOKIE, encodeURIComponent(persistView), {
+        path: "/",
+        maxAge: 31_536_000,
+        sameSite: "lax",
+      });
+    }
+    return response;
   }
 
   return supabaseResponse;

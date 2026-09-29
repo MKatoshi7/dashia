@@ -1,5 +1,6 @@
 import "server-only";
 
+import { FUNNEL_METRIC_KEYS, FUNNEL_METRICS, type FunnelMetric } from "@/lib/funnel";
 import { rateLimit } from "@/lib/rate-limit";
 
 import { metaFetch } from "./campaigns";
@@ -7,8 +8,6 @@ import {
   cacheSecondsFor,
   firstActionCount,
   getAdAccounts,
-  INITIATE_CHECKOUT_ACTIONS,
-  LANDING_PAGE_VIEW_ACTIONS,
   normalizeAccountId,
   sumActions,
   toYmd,
@@ -25,13 +24,6 @@ import { META_GRAPH_BASE, META_RATE_LIMIT } from "./config";
  *  - por hora do fuso da conta: vendas por horário e o acumulado do dia;
  *  - por plataforma + posicionamento: vendas por fonte e por posicionamento.
  */
-
-/** "Informações de pagamento adicionadas" — a etapa entre o IC e a compra. */
-const ADD_PAYMENT_INFO_ACTIONS = [
-  "add_payment_info",
-  "omni_add_payment_info",
-  "offsite_conversion.fb_pixel_add_payment_info",
-];
 
 export type HourPoint = {
   hour: number;
@@ -51,14 +43,12 @@ export type BreakdownRow = {
 export type MetaDashboard = {
   configured: boolean;
   errors: string[];
+  /** Monetários já na moeda da área (contas em USD convertidas). */
   spend: number;
-  impressions: number;
-  linkClicks: number;
-  landingViews: number;
-  checkouts: number;
-  paymentInfo: number;
   sales: number;
   revenue: number;
+  /** Total do período para cada métrica que o funil pode mostrar. */
+  funnel: Record<FunnelMetric, number>;
   /** Vendas por dia da semana, 0 = domingo … 6 = sábado. */
   weekday: number[];
   /** 24 posições, hora do fuso da conta de anúncio. */
@@ -108,11 +98,12 @@ function addBreakdown(
   key: string,
   label: string,
   row: Record<string, unknown>,
+  rate: number,
 ) {
   const entry = map.get(key) ?? { key, label, sales: 0, revenue: 0, spend: 0 };
   entry.sales += sumActions(row.actions, "purchase");
-  entry.revenue += sumActions(row.action_values, "purchase");
-  entry.spend += Number(row.spend) || 0;
+  entry.revenue += sumActions(row.action_values, "purchase") * rate;
+  entry.spend += (Number(row.spend) || 0) * rate;
   map.set(key, entry);
 }
 
@@ -125,13 +116,11 @@ export async function getMetaDashboard(
     configured: false,
     errors: [],
     spend: 0,
-    impressions: 0,
-    linkClicks: 0,
-    landingViews: 0,
-    checkouts: 0,
-    paymentInfo: 0,
     sales: 0,
     revenue: 0,
+    funnel: Object.fromEntries(
+      FUNNEL_METRIC_KEYS.map((key) => [key, 0]),
+    ) as Record<FunnelMetric, number>,
     weekday: [0, 0, 0, 0, 0, 0, 0],
     hours: emptyHours(),
     platforms: [],
@@ -152,6 +141,10 @@ export async function getMetaDashboard(
       result.errors.push(`${account.label}: token não configurado`);
       continue;
     }
+    if (account.rateError) {
+      result.errors.push(`${account.label}: ${account.rateError}`);
+    }
+    const rate = account.rate;
 
     // Três chamadas por conta — cada uma conta no limite conservador.
     let allowed = true;
@@ -171,7 +164,7 @@ export async function getMetaDashboard(
       metaFetch(
         insightsUrl(account, {
           fields:
-            "spend,impressions,inline_link_clicks,actions,action_values",
+            "spend,impressions,clicks,inline_link_clicks,actions,action_values",
           time_range: timeRange,
           time_increment: "1",
         }),
@@ -203,23 +196,19 @@ export async function getMetaDashboard(
       const row = raw as Record<string, unknown>;
       const sales = sumActions(row.actions, "purchase");
 
-      result.spend += Number(row.spend) || 0;
-      result.impressions += Number(row.impressions) || 0;
-      result.linkClicks += Number(row.inline_link_clicks) || 0;
-      result.landingViews += firstActionCount(
-        row.actions,
-        LANDING_PAGE_VIEW_ACTIONS,
-      );
-      result.checkouts += firstActionCount(
-        row.actions,
-        INITIATE_CHECKOUT_ACTIONS,
-      );
-      result.paymentInfo += firstActionCount(
-        row.actions,
-        ADD_PAYMENT_INFO_ACTIONS,
-      );
+      result.spend += (Number(row.spend) || 0) * rate;
       result.sales += sales;
-      result.revenue += sumActions(row.action_values, "purchase");
+      result.revenue += sumActions(row.action_values, "purchase") * rate;
+
+      for (const key of FUNNEL_METRIC_KEYS) {
+        const actions = FUNNEL_METRICS[key].actions;
+        if (actions) {
+          result.funnel[key] += firstActionCount(row.actions, [...actions]);
+        }
+      }
+      result.funnel.impressions += Number(row.impressions) || 0;
+      result.funnel.clicks += Number(row.clicks) || 0;
+      result.funnel.link_clicks += Number(row.inline_link_clicks) || 0;
 
       // date_start é o dia no fuso da conta ("YYYY-MM-DD"); meio-dia UTC
       // evita que o fuso do servidor empurre a data para o dia vizinho.
@@ -239,9 +228,9 @@ export async function getMetaDashboard(
       if (!Number.isInteger(hour) || hour < 0 || hour > 23) continue;
 
       const point = result.hours[hour];
-      point.spend += Number(row.spend) || 0;
+      point.spend += (Number(row.spend) || 0) * rate;
       point.sales += sumActions(row.actions, "purchase");
-      point.revenue += sumActions(row.action_values, "purchase");
+      point.revenue += sumActions(row.action_values, "purchase") * rate;
     }
 
     for (const raw of placement.data) {
@@ -250,12 +239,13 @@ export async function getMetaDashboard(
       const position = String(row.platform_position ?? "");
       const platformLabel = PLATFORM_LABELS[platform] ?? humanize(platform);
 
-      addBreakdown(platforms, platform, platformLabel, row);
+      addBreakdown(platforms, platform, platformLabel, row, rate);
       addBreakdown(
         placements,
         `${platform}:${position}`,
         position ? `${platformLabel} · ${humanize(position)}` : platformLabel,
         row,
+        rate,
       );
     }
   }

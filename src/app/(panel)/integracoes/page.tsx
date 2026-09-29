@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { Card, CardHeader, CardLabel } from "@/components/ui/card";
 import { getActiveArea } from "@/lib/areas";
 import { getPlatform } from "@/lib/checkout/platforms";
+import { DEFAULT_SETTINGS, getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
@@ -38,11 +39,17 @@ export default async function IntegracoesPage() {
   const supabase = await createClient();
   const baseUrl = await getBaseUrl();
 
-  const [{ data: accountsData }, { data: areaRow }, { data: integrations }] =
-    await Promise.all([
+  const [
+    { data: accountsData },
+    { data: areaRow },
+    { data: integrations },
+    settings,
+  ] = await Promise.all([
+      // `*`: currency/fx_rate só existem depois da migration
+      // account_currency_funnel — antes dela, simplesmente não vêm.
       supabase
         .from("meta_ad_accounts")
-        .select("id, label, ad_account_id, ads_token")
+        .select("*")
         .eq("area_id", activeArea.id)
         .order("created_at", { ascending: true }),
       supabase
@@ -54,7 +61,10 @@ export default async function IntegracoesPage() {
         .from("checkout_integrations")
         .select("plataforma, secret, enabled")
         .eq("area_id", activeArea.id),
+      getSettings(activeArea.id),
     ]);
+
+  const areaCurrency = settings?.currency ?? DEFAULT_SETTINGS.currency;
 
   const accounts: AccountRow[] = (accountsData ?? []).map((row) => ({
     id: row.id as string,
@@ -62,6 +72,8 @@ export default async function IntegracoesPage() {
     ad_account_id: row.ad_account_id as string,
     // Nunca expomos o ciphertext: só se existe ou não.
     hasToken: Boolean(row.ads_token),
+    currency: (row.currency as string | null) ?? null,
+    fxRate: row.fx_rate === null || row.fx_rate === undefined ? null : Number(row.fx_rate),
   }));
 
   const publicToken = (areaRow?.public_token as string) ?? "";
@@ -132,7 +144,7 @@ export default async function IntegracoesPage() {
           <CardLabel>Meta Ads</CardLabel>
           <span className="micro-label">leitura de insights</span>
         </CardHeader>
-        <MetaConnect accounts={accounts} />
+        <MetaConnect accounts={accounts} areaCurrency={areaCurrency} />
       </Card>
 
       {/* 2 — Checkout */}
