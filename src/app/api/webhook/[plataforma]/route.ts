@@ -18,6 +18,7 @@ import {
   safeEqual,
   savePurchase,
 } from "@/lib/webhooks/common";
+import { recordWebhookLog } from "@/lib/webhooks/logs";
 
 /**
  * POST /api/webhook/<plataforma>?a=<public_token_da_area>
@@ -260,6 +261,14 @@ export async function POST(
         `[webhook/${platform.id}] autenticação falhou. Headers recebidos: ${[...request.headers.keys()].join(", ")}`,
       );
     }
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: firstString(payload, platform.paths.event ?? []),
+      status: "error",
+      errorMessage: "Assinatura/token inválido",
+      payload,
+    });
     return json({ error: "invalid_signature" }, 401);
   }
 
@@ -273,6 +282,13 @@ export async function POST(
     eventName &&
     /^(event_test|test|webhook_test|ping)$/i.test(eventName.trim())
   ) {
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: eventName,
+      status: "test",
+      payload,
+    });
     return json({ ok: true, message: "test_event_received" }, 200);
   }
 
@@ -283,6 +299,14 @@ export async function POST(
       eventName.toLowerCase().includes(needle.toLowerCase()),
     )
   ) {
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: eventName,
+      status: "ignored",
+      errorMessage: "Evento ignorado (ex.: checkout abandonado)",
+      payload,
+    });
     return json({ ok: true, ignored: "event" }, 200);
   }
 
@@ -294,6 +318,14 @@ export async function POST(
   if (!transactionId) {
     // Sem chave de idempotência não dá para gravar; 200 evita reenvio infinito.
     console.warn(`[webhook/${platform.id}] payload sem transaction id`);
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: eventName,
+      status: "ignored",
+      errorMessage: "Payload sem transaction id",
+      payload,
+    });
     return json({ ok: true, ignored: "missing_transaction" }, 200);
   }
 
@@ -317,11 +349,6 @@ export async function POST(
   /**
    * ad_id, em ordem de precedência: campos nativos da plataforma → utm_content
    * → última posição do pacote por pipe.
-   *
-   * `pickAdId` percorre TODOS os caminhos candidatos até achar um id válido —
-   * um campo preenchido com lixo (ex.: `src=organico`) não bloqueia os
-   * seguintes. E `extractAdId` desmonta campos compostos (o `xcod` da Hotmart
-   * chega como "<algo>_<ad_id>"), respeitando o `adIdSegment` da plataforma.
    */
   const segment = platform.adIdSegment;
   const adId =
@@ -335,6 +362,11 @@ export async function POST(
     city: pick(paths.geoCity),
   };
 
+  const valor = normalizeAmount(platform, firstNumber(source, paths.value));
+  const produto = pick(paths.product);
+  const email = pick(paths.email);
+  const telefone = pick(paths.phone);
+
   try {
     await savePurchase({
       areaId: area.areaId,
@@ -343,10 +375,10 @@ export async function POST(
       status,
       // Se o `sck` era um pacote de UTMs, ele NÃO é um id de visitante.
       userId: piped.source ? null : rawUserId,
-      email: pick(paths.email),
-      telefone: pick(paths.phone),
-      produto: pick(paths.product),
-      valor: normalizeAmount(platform, firstNumber(source, paths.value)),
+      email,
+      telefone,
+      produto,
+      valor,
       moeda: pick(paths.currency),
       adId,
       // Order bump / upsell: soma no faturamento, mas não é venda nova.
@@ -357,9 +389,43 @@ export async function POST(
       utm,
       geo,
     });
+
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: eventName,
+      status: "processed",
+      transactionId,
+      adId,
+      produto,
+      valor,
+      email,
+      telefone,
+      utmSource: utm.source,
+      utmMedium: utm.medium,
+      utmCampaign: utm.campaign,
+      utmTerm: utm.term,
+      utmContent: utm.content,
+      payload,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[webhook/${platform.id}] falha ao gravar compra:`, err);
+
+    await recordWebhookLog({
+      areaId: area.areaId,
+      plataforma: platform.id,
+      event: eventName,
+      status: "error",
+      transactionId,
+      adId,
+      produto,
+      valor,
+      email,
+      telefone,
+      errorMessage: message,
+      payload,
+    });
 
     // Responde 200 para a Cakto/plataforma registrar entrega bem-sucedida
     // e não ficar marcando webhook como falha/negativo nem desativar a integração.

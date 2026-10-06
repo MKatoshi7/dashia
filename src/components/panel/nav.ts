@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Megaphone,
   Plug,
+  ScrollText,
   Settings,
   ShieldCheck,
   ShoppingCart,
@@ -33,6 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/financeiro", label: "Financeiro", icon: Wallet, section: "analise" },
   { href: "/integracoes", label: "Integrações", icon: Plug, section: "operacao" },
   { href: "/regras", label: "Regras", icon: Zap, section: "operacao" },
+  { href: "/logs", label: "Logs", icon: ScrollText, section: "operacao" },
   { href: "/configuracoes", label: "Configurações", icon: Settings, section: "operacao" },
   { href: "/admin", label: "Admin", icon: ShieldCheck, section: "operacao" },
 ];
