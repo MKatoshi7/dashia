@@ -55,7 +55,7 @@ export function RealtimeSales({
         .on(
           "postgres_changes",
           {
-            event: "INSERT",
+            event: "*",
             schema: "public",
             table: "purchases",
             filter: `area_id=eq.${areaId}`,

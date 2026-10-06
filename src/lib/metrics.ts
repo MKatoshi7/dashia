@@ -1,5 +1,7 @@
 import "server-only";
 
+import { cache } from "react";
+
 import { isPrimarySale } from "@/lib/sales";
 import { createClient } from "@/lib/supabase/server";
 
@@ -180,28 +182,26 @@ export async function getPurchaseMetrics(
  * Faturamento aprovado no intervalo — versão leve, para a barra de progresso
  * da meta no header (que é mensal e independe do período selecionado).
  */
-export async function getRevenueTotal(
-  areaId: string,
-  from: Date,
-  to: Date,
-): Promise<number> {
-  try {
-    const supabase = await createClient();
-    const { data, error } = await supabase
-      .from("purchases")
-      .select("valor")
-      .eq("area_id", areaId)
-      .eq("status", "approved")
-      .gte("created_at", from.toISOString())
-      .lte("created_at", to.toISOString())
-      .limit(10_000);
+export const getRevenueTotal = cache(
+  async (areaId: string, from: Date, to: Date): Promise<number> => {
+    try {
+      const supabase = await createClient();
+      const { data, error } = await supabase
+        .from("purchases")
+        .select("valor")
+        .eq("area_id", areaId)
+        .eq("status", "approved")
+        .gte("created_at", from.toISOString())
+        .lte("created_at", to.toISOString())
+        .limit(10_000);
 
-    if (error || !data) return 0;
-    return data.reduce((sum, row) => sum + (Number(row.valor) || 0), 0);
-  } catch {
-    return 0;
-  }
-}
+      if (error || !data) return 0;
+      return data.reduce((sum, row) => sum + (Number(row.valor) || 0), 0);
+    } catch {
+      return 0;
+    }
+  },
+);
 
 /** Junta o gasto diário da Meta na série de faturamento. */
 export function mergeDailySpend(

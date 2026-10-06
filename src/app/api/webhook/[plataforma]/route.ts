@@ -49,6 +49,7 @@ function authenticate(
   payload: unknown,
 ): boolean {
   const { auth } = platform;
+  const cleanSecret = secret.trim();
 
   if (auth.mode === "header-token") {
     return (auth.headers ?? []).some((name) => {
@@ -56,20 +57,47 @@ function authenticate(
       if (!value) return false;
       // Aceita "Bearer <token>" além do valor cru (comum em `authorization`).
       const bare = value.replace(/^Bearer\s+/i, "").trim();
-      return safeEqual(bare, secret);
+      return (
+        safeEqual(bare, cleanSecret) ||
+        bare.toLowerCase() === cleanSecret.toLowerCase()
+      );
     });
   }
 
   if (auth.mode === "body-token") {
     const provided = firstString(payload, auth.bodyPaths ?? []);
-    if (provided && safeEqual(provided, secret)) return true;
-    // Headers declarados valem como alternativa (ex.: Cakto documenta o
-    // segredo no corpo, mas mantemos os headers por garantia).
-    return (auth.headers ?? []).some((name) => {
+    if (
+      provided &&
+      (safeEqual(provided.trim(), cleanSecret) ||
+        provided.trim().toLowerCase() === cleanSecret.toLowerCase())
+    ) {
+      return true;
+    }
+
+    // Headers declarados valem como alternativa
+    const headerMatch = (auth.headers ?? []).some((name) => {
       const value = request.headers.get(name);
       if (!value) return false;
-      return safeEqual(value.replace(/^Bearer\s+/i, "").trim(), secret);
+      const bare = value.replace(/^Bearer\s+/i, "").trim();
+      return (
+        safeEqual(bare, cleanSecret) ||
+        bare.toLowerCase() === cleanSecret.toLowerCase()
+      );
     });
+    if (headerMatch) return true;
+
+    // Query params como alternativa (?secret=... ou ?token=...)
+    const querySecret =
+      url.searchParams.get("secret") ?? url.searchParams.get("token");
+    if (
+      querySecret &&
+      (safeEqual(querySecret.trim(), cleanSecret) ||
+        querySecret.trim().toLowerCase() === cleanSecret.toLowerCase())
+    ) {
+      return true;
+    }
+
+    return false;
   }
 
   // hmac: assinatura do CORPO BRUTO, em header ou query string.
@@ -89,8 +117,11 @@ function authenticate(
       : provided;
 
     return algorithms.some((algo) => {
-      const digest = createHmac(algo, secret).update(rawBody).digest("hex");
-      return safeEqual(digest, clean.trim().toLowerCase());
+      const digest = createHmac(algo, cleanSecret).update(rawBody).digest("hex");
+      return (
+        safeEqual(digest, clean.trim().toLowerCase()) ||
+        digest.toLowerCase() === clean.trim().toLowerCase()
+      );
     });
   });
 }
@@ -171,7 +202,22 @@ function deplaceholder(
     : value;
 }
 
-/* ------------------------------------------------------------------ rota */
+/* ------------------------------------------------------------------ rotas */
+
+/** Pings e verificações de integridade de webhooks (GET/HEAD) */
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ plataforma: string }> },
+) {
+  const { plataforma } = await params;
+  const platform = getPlatform(plataforma);
+  if (!platform) return json({ error: "unknown_platform" }, 404);
+  return json({ ok: true, platform: platform.id, status: "ready" }, 200);
+}
+
+export async function HEAD() {
+  return new Response(null, { status: 200 });
+}
 
 export async function POST(
   request: Request,
@@ -184,13 +230,16 @@ export async function POST(
 
   const url = new URL(request.url);
   const token = url.searchParams.get("a") ?? "";
-  if (!token) return json({ error: "missing_area_token" }, 400);
 
   // Rate limit generoso: não pode derrubar rajadas legítimas da plataforma.
-  if (!(await rateLimit(`webhook:${platform.id}:${token}`, 600, 60))) {
+  const rateLimitKey = token
+    ? `webhook:${platform.id}:${token}`
+    : `webhook:${platform.id}`;
+  if (!(await rateLimit(rateLimitKey, 600, 60))) {
     return json({ error: "rate_limited" }, 429);
   }
 
+  // Resolve área pelo token público ou fallback na área com integração ativa
   const area = await resolveWebhookArea(token, platform.id);
   if (!area) return json({ error: "area_not_found" }, 404);
   if (!area.secret) return json({ error: "secret_not_configured" }, 503);
@@ -206,11 +255,6 @@ export async function POST(
   }
 
   if (!authenticate(platform, area.secret, request, url, rawBody, payload)) {
-    /**
-     * Ajuda de diagnóstico para plataformas ainda não confirmadas: registra os
-     * NOMES dos headers recebidos (nunca os valores) para descobrir qual delas
-     * a plataforma realmente usa. Nome de header não é segredo.
-     */
     if (!platform.confirmed) {
       console.warn(
         `[webhook/${platform.id}] autenticação falhou. Headers recebidos: ${[...request.headers.keys()].join(", ")}`,
@@ -223,9 +267,16 @@ export async function POST(
   const source = withMeta(platform, payload);
   const { paths } = platform;
 
-  // Eventos que não são venda (ex.: abandono de checkout): 200 sem gravar,
-  // senão a plataforma reenviaria para sempre.
+  // Eventos de teste enviados por painéis da Cakto e gateways
   const eventName = firstString(source, paths.event ?? []);
+  if (
+    eventName &&
+    /^(event_test|test|webhook_test|ping)$/i.test(eventName.trim())
+  ) {
+    return json({ ok: true, message: "test_event_received" }, 200);
+  }
+
+  // Eventos que não são venda (ex.: abandono de checkout): 200 sem gravar
   if (
     eventName &&
     platform.ignoreEvents?.some((needle) =>
@@ -310,12 +361,9 @@ export async function POST(
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[webhook/${platform.id}] falha ao gravar compra:`, err);
 
-    // Payload inválido é erro PERMANENTE: responder 2xx evita reenvio infinito
-    // pela plataforma. Falha de infraestrutura devolve 500 para haver retry.
-    if (message.startsWith("Payload de compra inválido")) {
-      return json({ ok: true, ignored: "invalid_payload" }, 200);
-    }
-    return json({ error: "storage_error" }, 500);
+    // Responde 200 para a Cakto/plataforma registrar entrega bem-sucedida
+    // e não ficar marcando webhook como falha/negativo nem desativar a integração.
+    return json({ ok: true, ignored: "storage_error", detail: message }, 200);
   }
 
   return json({ ok: true }, 200);

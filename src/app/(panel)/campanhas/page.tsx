@@ -228,7 +228,7 @@ export default async function CampanhasPage({
         <div className="flex items-center gap-2">
           <div
             className="group relative"
-            title="Vendas na Meta: o que o Gerenciador reporta (pixel). Last Click: vendas do webhook do checkout casadas por ad_id. Os dois NUNCA são somados."
+            title="Vendas da Meta: o que o Gerenciador reporta (pixel). Vendas da Cakto: compras e assinaturas reais recebidas via webhook da Cakto casadas por ad_id ou UTMs. Os dois NUNCA são somados."
           >
             <Info className="size-4 text-muted-foreground" />
           </div>
@@ -242,7 +242,7 @@ export default async function CampanhasPage({
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              Vendas na Meta
+              Vendas da Meta
             </Link>
             <Link
               href={buildHref(params, { attr: "lastclick" })}
@@ -253,7 +253,7 @@ export default async function CampanhasPage({
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              Atribuição Last Click
+              Vendas da Cakto
             </Link>
           </nav>
         </div>
@@ -304,7 +304,7 @@ export default async function CampanhasPage({
         <Card>
           <div className="border-b border-border p-4">
             <span className="micro-label">
-              Top 5 Anúncios (Last Click)
+              Top 5 Anúncios ({attribution === "meta" ? "Vendas Meta" : "Vendas Cakto"})
             </span>
           </div>
           {topAds.length === 0 ? (
@@ -376,7 +376,7 @@ export default async function CampanhasPage({
                 label={
                   attribution === "meta"
                     ? "Vendas (relatadas pela Meta)"
-                    : "Vendas aprovadas (Last Click)"
+                    : "Vendas e Assinaturas (Cakto)"
                 }
                 value={totalSales}
                 previous={totalCheckouts}

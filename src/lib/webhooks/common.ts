@@ -45,28 +45,67 @@ export async function resolveWebhookArea(
   try {
     const admin = createAdminClient();
 
-    const { data: area } = await admin
-      .from("areas")
-      .select("id")
-      .eq("public_token", token)
-      .maybeSingle();
+    let areaId: string | null = null;
 
-    if (!area) return null;
+    if (token && token.trim()) {
+      const { data: area } = await admin
+        .from("areas")
+        .select("id")
+        .eq("public_token", token.trim())
+        .maybeSingle();
+
+      if (area) areaId = area.id;
+    }
+
+    // Fallback: se o webhook não trouxe ?a=<token> ou o provedor stripou os query params,
+    // busca a área que configurou esta plataforma e está com o segredo ativo.
+    if (!areaId) {
+      const { data: fallbackIntegration } = await admin
+        .from("checkout_integrations")
+        .select("area_id, secret, enabled")
+        .eq("plataforma", plataforma)
+        .eq("enabled", true)
+        .not("secret", "is", null)
+        .limit(1)
+        .maybeSingle();
+
+      if (fallbackIntegration?.area_id) {
+        return {
+          areaId: fallbackIntegration.area_id,
+          secret: await decryptSecret(fallbackIntegration.secret as string),
+        };
+      }
+
+      // Se ainda não resolveu, busca a primeira área existente no banco (sistema single-tenant)
+      const { data: firstArea } = await admin
+        .from("areas")
+        .select("id")
+        .limit(1)
+        .maybeSingle();
+
+      if (firstArea?.id) {
+        areaId = firstArea.id;
+      } else {
+        return null;
+      }
+    }
+
+    if (!areaId) return null;
 
     const { data: integration } = await admin
       .from("checkout_integrations")
       .select("secret, enabled")
-      .eq("area_id", area.id)
+      .eq("area_id", areaId)
       .eq("plataforma", plataforma)
       .maybeSingle();
 
     // Integração desligada explicitamente: trata como não configurada.
     if (!integration?.secret || integration.enabled === false) {
-      return { areaId: area.id, secret: null };
+      return { areaId, secret: null };
     }
 
     return {
-      areaId: area.id,
+      areaId,
       secret: await decryptSecret(integration.secret as string),
     };
   } catch (err) {

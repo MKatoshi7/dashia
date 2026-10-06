@@ -91,7 +91,11 @@ export function CheckoutConnect({
             <h3 className="text-sm font-semibold tracking-tight">
               Conectar {platform.label}
             </h3>
-            {platform.confirmed ? (
+            {connected.has(platform.id) ? (
+              <span className="micro-label inline-flex items-center gap-1 rounded bg-[hsl(var(--primary)/0.15)] px-2 py-0.5 font-medium text-primary">
+                <Check className="size-3" /> Configurada e Conectada
+              </span>
+            ) : platform.confirmed ? (
               <span className="micro-label inline-flex items-center gap-1 text-primary">
                 <ShieldCheck className="size-3" /> payload confirmado
               </span>
@@ -100,9 +104,6 @@ export function CheckoutConnect({
                 <AlertTriangle className="size-3" /> não confirmado
               </span>
             )}
-            {connected.has(platform.id) ? (
-              <span className="micro-label text-primary">· conectada</span>
-            ) : null}
           </div>
 
           {/* URL do webhook desta plataforma */}
@@ -177,7 +178,11 @@ export function CheckoutConnect({
                 name="value"
                 type="password"
                 autoComplete="off"
-                placeholder={platform.secretHint}
+                placeholder={
+                  connected.has(platform.id)
+                    ? "•••••••••••••••• (segredo salvo e ativo)"
+                    : platform.secretHint
+                }
               />
               <Button
                 type="submit"
@@ -193,10 +198,19 @@ export function CheckoutConnect({
                 Salvar
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Cifrado antes de ir para o banco. Deixe em branco e salve para
-              desconectar.
-            </p>
+            {connected.has(platform.id) ? (
+              <p className="flex items-center gap-1.5 text-xs text-primary">
+                <Check className="size-3.5 shrink-0" />
+                <span>
+                  Segredo salvo com sucesso no banco de dados. Para alterar, digite um novo valor e clique em Salvar. Deixe em branco e salve para desconectar.
+                </span>
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Cifrado antes de ir para o banco. Deixe em branco e salve para
+                desconectar.
+              </p>
+            )}
             {state.error ? (
               <p role="alert" className="text-xs text-destructive">
                 {state.error}
