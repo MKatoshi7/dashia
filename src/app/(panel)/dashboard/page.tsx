@@ -16,6 +16,7 @@ import { DashboardV2 } from "@/components/panel/dashboard-v2/dashboard-v2";
 import { KpiCard } from "@/components/panel/kpi-card";
 import { RealtimeSales } from "@/components/panel/realtime-sales";
 import { RegionBreakdown } from "@/components/panel/region-breakdown";
+import { ReorderableBoxes } from "@/components/panel/reorderable-boxes";
 import { RevenueChart } from "@/components/panel/revenue-chart";
 import { Card } from "@/components/ui/card";
 import { getActiveArea } from "@/lib/areas";
@@ -118,82 +119,100 @@ export default async function DashboardPage({
         </Card>
       ) : null}
 
-      {/* Grade de KPIs: 3 colunas × 2 linhas (empilha no mobile) */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <KpiCard
-          label="Faturamento Bruto"
-          value={formatCurrency(revenue, currency)}
-          icon={Banknote}
-        />
-        <KpiCard
-          label="Gasto com Ads"
-          value={formatCurrency(adSpend, currency)}
-          icon={Megaphone}
-          sub={`Ads ${formatCurrency(adSpend, currency)} · Imposto ${formatNumber(Number(taxRate))}% (${formatCurrency(tax, currency)})`}
-        />
-        <KpiCard
-          label="Lucro"
-          value={formatCurrency(profit, currency)}
-          icon={TrendingUp}
-          accent={profit < 0 ? "destructive" : "primary"}
-        />
-        <KpiCard
-          label="Vendas Aprovadas"
-          value={formatNumber(sales)}
-          icon={ShoppingBag}
-          sensitive={false}
-        />
-        <KpiCard
-          label="ROAS"
-          value={formatRoas(roas)}
-          icon={Target}
-          accent={roas > 0 && roas < 1 ? "destructive" : "primary"}
-        />
-        <KpiCard
-          label="CPA"
-          value={formatCurrency(cpa, currency)}
-          icon={BadgeDollarSign}
-        />
-      </div>
-
-      {/* Gráfico + feed em tempo real */}
-      <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <div className="flex items-center gap-2 border-b border-border p-4">
-            <Activity className="size-4 text-muted-foreground" />
-            <span className="micro-label">
-              Faturamento vs Gasto
-            </span>
-          </div>
-          <div className="sensitive">
-            <RevenueChart data={daily} currency={currency} />
-          </div>
-        </Card>
-
-        <Card>
-          <div className="flex items-center gap-2 border-b border-border p-4">
-            <Radio className="size-4 text-muted-foreground" />
-            <span className="micro-label">
-              Vendas em Tempo Real
-            </span>
-          </div>
-          <RealtimeSales
-            areaId={activeArea.id}
-            currency={currency}
-            initial={safeMetrics.recent}
-          />
-        </Card>
-
-        <Card className="xl:col-span-3">
-          <div className="flex items-center gap-2 border-b border-border p-4">
-            <Globe2 className="size-4 text-muted-foreground" />
-            <span className="micro-label">
-              Vendas por Região
-            </span>
-          </div>
-          <RegionBreakdown regions={safeMetrics.regions} currency={currency} />
-        </Card>
-      </div>
+      {/* Blocos reordenáveis do Dashboard com Grip magnético (6 pontinhos) */}
+      <ReorderableBoxes
+        storageKey="dashia_dashboard_boxes_order"
+        className="grid-cols-1 gap-3 xl:grid-cols-3"
+        items={[
+          {
+            id: "kpis",
+            className: "xl:col-span-3",
+            children: (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <KpiCard
+                  label="Faturamento Bruto"
+                  value={formatCurrency(revenue, currency)}
+                  icon={Banknote}
+                />
+                <KpiCard
+                  label="Gasto com Ads"
+                  value={formatCurrency(adSpend, currency)}
+                  icon={Megaphone}
+                  sub={`Ads ${formatCurrency(adSpend, currency)} · Imposto ${formatNumber(Number(taxRate))}% (${formatCurrency(tax, currency)})`}
+                />
+                <KpiCard
+                  label="Lucro"
+                  value={formatCurrency(profit, currency)}
+                  icon={TrendingUp}
+                  accent={profit < 0 ? "destructive" : "primary"}
+                />
+                <KpiCard
+                  label="Vendas Aprovadas"
+                  value={formatNumber(sales)}
+                  icon={ShoppingBag}
+                  sensitive={false}
+                />
+                <KpiCard
+                  label="ROAS"
+                  value={formatRoas(roas)}
+                  icon={Target}
+                  accent={roas > 0 && roas < 1 ? "destructive" : "primary"}
+                />
+                <KpiCard
+                  label="CPA"
+                  value={formatCurrency(cpa, currency)}
+                  icon={BadgeDollarSign}
+                />
+              </div>
+            ),
+          },
+          {
+            id: "revenue_chart",
+            className: "xl:col-span-2",
+            children: (
+              <Card className="h-full">
+                <div className="flex items-center gap-2 border-b border-border p-4">
+                  <Activity className="size-4 text-muted-foreground" />
+                  <span className="micro-label">Faturamento vs Gasto</span>
+                </div>
+                <div className="sensitive">
+                  <RevenueChart data={daily} currency={currency} />
+                </div>
+              </Card>
+            ),
+          },
+          {
+            id: "realtime_sales",
+            className: "xl:col-span-1",
+            children: (
+              <Card className="h-full">
+                <div className="flex items-center gap-2 border-b border-border p-4">
+                  <Radio className="size-4 text-muted-foreground" />
+                  <span className="micro-label">Vendas em Tempo Real</span>
+                </div>
+                <RealtimeSales
+                  areaId={activeArea.id}
+                  currency={currency}
+                  initial={safeMetrics.recent}
+                />
+              </Card>
+            ),
+          },
+          {
+            id: "region_breakdown",
+            className: "xl:col-span-3",
+            children: (
+              <Card className="h-full">
+                <div className="flex items-center gap-2 border-b border-border p-4">
+                  <Globe2 className="size-4 text-muted-foreground" />
+                  <span className="micro-label">Vendas por Região</span>
+                </div>
+                <RegionBreakdown regions={safeMetrics.regions} currency={currency} />
+              </Card>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

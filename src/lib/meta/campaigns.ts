@@ -48,6 +48,9 @@ export type MetaEntity = {
   metaLandingViews: number;
   /** ad_ids que compõem a linha — base da atribuição Last Click. */
   adIds: string[];
+  /** IDs de hierarquia para filtro e isolamento (Campanha → Conjunto → Anúncio). */
+  campaignId?: string;
+  adsetId?: string;
 };
 
 export type CampaignsResult = {
@@ -136,8 +139,10 @@ async function fetchEntities(
 ) {
   const fields =
     level === "ad"
-      ? "id,name,status,effective_status"
-      : "id,name,status,effective_status,daily_budget,lifetime_budget";
+      ? "id,name,status,effective_status,campaign_id,adset_id"
+      : level === "adset"
+        ? "id,name,status,effective_status,campaign_id,daily_budget,lifetime_budget"
+        : "id,name,status,effective_status,daily_budget,lifetime_budget";
 
   const params = new URLSearchParams({
     fields,
@@ -198,6 +203,11 @@ export async function getMetaEntities(
     if (insights.error) errors.push(`${account.label}: ${insights.error}`);
     if (entities.error) errors.push(`${account.label}: ${entities.error}`);
 
+    // Mapeamentos de hierarquia a partir dos insights
+    const adsetCampaignMap = new Map<string, string>();
+    const adCampaignMap = new Map<string, string>();
+    const adAdsetMap = new Map<string, string>();
+
     // Agrega os insights de anúncio para o nível pedido.
     const idField = LEVEL_ID_FIELD[level];
     const aggregated = new Map<
@@ -208,6 +218,14 @@ export async function getMetaEntities(
     for (const raw of insights.data) {
       const row = raw as Record<string, unknown>;
       const id = row[idField];
+      const adId = typeof row.ad_id === "string" ? row.ad_id : null;
+      const adsetId = typeof row.adset_id === "string" ? row.adset_id : null;
+      const campaignId = typeof row.campaign_id === "string" ? row.campaign_id : null;
+
+      if (adsetId && campaignId) adsetCampaignMap.set(adsetId, campaignId);
+      if (adId && campaignId) adCampaignMap.set(adId, campaignId);
+      if (adId && adsetId) adAdsetMap.set(adId, adsetId);
+
       if (typeof id !== "string") continue;
 
       const entry = aggregated.get(id) ?? {
@@ -237,7 +255,6 @@ export async function getMetaEntities(
         LANDING_PAGE_VIEW_ACTIONS,
       );
 
-      const adId = row.ad_id;
       if (typeof adId === "string" && !entry.adIds.includes(adId)) {
         entry.adIds.push(adId);
       }
@@ -264,6 +281,24 @@ export async function getMetaEntities(
       const daily = centsToAmount(entity.daily_budget);
       const lifetime = centsToAmount(entity.lifetime_budget);
 
+      const campaignId =
+        level === "campaign"
+          ? id
+          : typeof entity.campaign_id === "string" && entity.campaign_id
+            ? entity.campaign_id
+            : level === "adset"
+              ? adsetCampaignMap.get(id)
+              : adCampaignMap.get(id);
+
+      const adsetId =
+        level === "adset"
+          ? id
+          : typeof entity.adset_id === "string" && entity.adset_id
+            ? entity.adset_id
+            : level === "ad"
+              ? adAdsetMap.get(id)
+              : undefined;
+
       rows.push({
         id,
         name: typeof entity.name === "string" ? entity.name : id,
@@ -279,6 +314,8 @@ export async function getMetaEntities(
         accountId: account.id,
         accountLabel: account.label,
         ...metrics,
+        campaignId,
+        adsetId,
         adIds: level === "ad" ? [id] : metrics.adIds,
       });
     }

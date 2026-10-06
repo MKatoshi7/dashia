@@ -1,8 +1,9 @@
-import { Info, TriangleAlert } from "lucide-react";
+import { Filter, Info, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Link from "next/link";
 
+import { ReorderableBoxes } from "@/components/panel/reorderable-boxes";
 import { Card } from "@/components/ui/card";
 import { getActiveArea } from "@/lib/areas";
 import {
@@ -37,12 +38,19 @@ type SearchParams = {
   account?: string;
   q?: string;
   status?: string;
+  selected_campaigns?: string;
+  selected_adsets?: string;
+  selected_ads?: string;
+  isolated?: string;
 };
 
-function buildHref(params: SearchParams, patch: Record<string, string>) {
+function buildHref(
+  params: SearchParams,
+  patch: Record<string, string | null | undefined>,
+) {
   const search = new URLSearchParams();
   for (const [k, v] of Object.entries({ ...params, ...patch })) {
-    if (v) search.set(k, String(v));
+    if (v !== null && v !== undefined && v !== "") search.set(k, String(v));
   }
   return `/campanhas?${search.toString()}`;
 }
@@ -132,6 +140,8 @@ export default async function CampanhasPage({
       level: entity.level,
       status: entity.status,
       effectiveStatus: entity.effectiveStatus,
+      campaignId: entity.campaignId,
+      adsetId: entity.adsetId,
       budgetAmount: entity.budgetAmount,
       budgetType: entity.budgetType,
       budgetCurrency: entity.budgetCurrency,
@@ -157,8 +167,45 @@ export default async function CampanhasPage({
       ctr:
         entity.impressions > 0 ? (entity.clicks / entity.impressions) * 100 : 0,
       cpc: entity.clicks > 0 ? entity.spend / entity.clicks : 0,
+      adIds: entity.adIds,
     };
   });
+
+  const selectedCampaignIds = params.selected_campaigns
+    ? params.selected_campaigns.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const selectedAdsetIds = params.selected_adsets
+    ? params.selected_adsets.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const selectedAdIds = params.selected_ads
+    ? params.selected_ads.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
+  const isIsolated = params.isolated === "1" || params.isolated === "true";
+
+  // Isolamento e filtro por hierarquia (Campanha → Conjunto → Anúncio)
+  if (level === "campaign" && isIsolated && selectedCampaignIds.length > 0) {
+    rows = rows.filter((r) => selectedCampaignIds.includes(r.id));
+  } else if (level === "adset") {
+    if (isIsolated && selectedAdsetIds.length > 0) {
+      rows = rows.filter((r) => selectedAdsetIds.includes(r.id));
+    } else if (selectedCampaignIds.length > 0) {
+      rows = rows.filter(
+        (r) => r.campaignId && selectedCampaignIds.includes(r.campaignId),
+      );
+    }
+  } else if (level === "ad") {
+    if (isIsolated && selectedAdIds.length > 0) {
+      rows = rows.filter((r) => selectedAdIds.includes(r.id));
+    } else if (selectedAdsetIds.length > 0) {
+      rows = rows.filter(
+        (r) => r.adsetId && selectedAdsetIds.includes(r.adsetId),
+      );
+    } else if (selectedCampaignIds.length > 0) {
+      rows = rows.filter(
+        (r) => r.campaignId && selectedCampaignIds.includes(r.campaignId),
+      );
+    }
+  }
 
   // Filtros de busca e status (aplicados no servidor).
   if (params.q) {
@@ -175,8 +222,19 @@ export default async function CampanhasPage({
     rows = rows.filter((r) => !isRunning(r));
   }
 
-  // Top 5 anúncios por faturamento Last Click (independe do modo da tabela).
-  const topAds = [...lastClick.entries()]
+  // Top 5 anúncios: se houver seleção/isolamento ativo, restringe aos criativos do conjunto filtrado
+  const activeAdIds = new Set(rows.flatMap((r) => r.adIds));
+  const hasHierarchyFilter =
+    selectedCampaignIds.length > 0 ||
+    selectedAdsetIds.length > 0 ||
+    selectedAdIds.length > 0 ||
+    isIsolated;
+
+  const topAdsCandidates = hasHierarchyFilter
+    ? [...lastClick.entries()].filter(([adId]) => activeAdIds.has(adId))
+    : [...lastClick.entries()];
+
+  const topAds = topAdsCandidates
     .map(([adId, row]) => ({ adId, ...row }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 5);
@@ -187,15 +245,10 @@ export default async function CampanhasPage({
       .map((r) => [r.id, r.name] as const),
   );
 
-  // Totais do funil — TODOS derivados do MESMO conjunto já filtrado. Antes os
-  // cliques vinham de `meta.rows` (sem filtro) e as vendas de `rows` (filtrado),
-  // então filtrar por "ativas" reduzia as vendas sem reduzir os cliques e a taxa
-  // de conversão saía errada.
+  // Totais do funil — TODOS derivados do MESMO conjunto já filtrado.
   const totalImpressions = rows.reduce((sum, r) => sum + r.impressions, 0);
   const totalClicks = rows.reduce((sum, r) => sum + r.clicks, 0);
   const totalSales = rows.reduce((sum, r) => sum + r.sales, 0);
-  // Visitas e checkouts: eventos próprios quando o snippet está ligado; senão,
-  // o que o pixel reportou à Meta, somado do MESMO conjunto filtrado.
   const totalViews = hasOwnEvents
     ? funnelBase.views
     : rows.reduce((sum, r) => sum + r.landingViews, 0);
@@ -206,23 +259,37 @@ export default async function CampanhasPage({
 
   return (
     <div className="space-y-4">
-      {/* Tabs de nível + toggle de atribuição */}
+      {/* Tabs de nível com badges de quantidade selecionada + toggle de atribuição */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <nav className="flex gap-1 rounded-lg border border-border bg-[hsl(var(--muted)/0.4)] p-1">
-          {LEVELS.map((item) => (
-            <Link
-              key={item.key}
-              href={buildHref(params, { level: item.key })}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm transition-colors",
-                level === item.key
-                  ? "bg-[hsl(var(--primary)/0.15)] font-medium text-primary"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {LEVELS.map((item) => {
+            const count =
+              item.key === "campaign"
+                ? selectedCampaignIds.length
+                : item.key === "adset"
+                  ? selectedAdsetIds.length
+                  : selectedAdIds.length;
+
+            return (
+              <Link
+                key={item.key}
+                href={buildHref(params, { level: item.key })}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors",
+                  level === item.key
+                    ? "bg-[hsl(var(--primary)/0.15)] font-medium text-primary"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <span>{item.label}</span>
+                {count > 0 ? (
+                  <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary/20 px-1 font-mono text-[0.65rem] font-bold text-primary">
+                    {count}
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
         </nav>
 
         <div className="flex items-center gap-2">
@@ -265,6 +332,63 @@ export default async function CampanhasPage({
         account={params.account ?? ""}
       />
 
+      {/* Banner de Isolamento / Filtragem ativa por hierarquia */}
+      {(isIsolated && selectedCampaignIds.length > 0 && level === "campaign") ||
+      (selectedCampaignIds.length > 0 && level === "adset") ||
+      ((selectedAdsetIds.length > 0 || selectedCampaignIds.length > 0) && level === "ad") ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2.5 text-xs text-foreground">
+          <div className="flex items-center gap-2">
+            <Filter className="size-4 shrink-0 text-primary" />
+            <span>
+              {level === "campaign" && (
+                <>
+                  Isolando <strong>{selectedCampaignIds.length}</strong> campanha(s) selecionada(s).
+                </>
+              )}
+              {level === "adset" && (
+                <>
+                  Exibindo conjuntos pertencentes a{" "}
+                  <strong>{selectedCampaignIds.length}</strong> campanha(s) selecionada(s).
+                </>
+              )}
+              {level === "ad" && selectedAdsetIds.length > 0 && (
+                <>
+                  Exibindo anúncios pertencentes a{" "}
+                  <strong>{selectedAdsetIds.length}</strong> conjunto(s) selecionado(s).
+                </>
+              )}
+              {level === "ad" && selectedAdsetIds.length === 0 && selectedCampaignIds.length > 0 && (
+                <>
+                  Exibindo anúncios pertencentes a{" "}
+                  <strong>{selectedCampaignIds.length}</strong> campanha(s) selecionada(s).
+                </>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {isIsolated ? (
+              <Link
+                href={buildHref(params, { isolated: "" })}
+                className="rounded border border-border bg-background px-2.5 py-1 font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                Remover isolamento (ver todos)
+              </Link>
+            ) : null}
+            <Link
+              href={buildHref(params, {
+                selected_campaigns: "",
+                selected_adsets: "",
+                selected_ads: "",
+                isolated: "",
+              })}
+              className="rounded border border-destructive/40 bg-destructive/10 px-2.5 py-1 font-medium text-destructive transition-colors hover:bg-destructive/20"
+            >
+              Limpar todas as seleções
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
       {!meta.configured ? (
         <Card className="flex items-start gap-3 p-4">
           <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber" />
@@ -291,132 +415,158 @@ export default async function CampanhasPage({
         </Card>
       ) : null}
 
-      <Card>
-        <CampaignsTable
-          rows={rows}
-          currency={currency}
-          canEdit={meta.configured}
-          columnOrder={settings?.campaign_columns ?? DEFAULT_SETTINGS.campaign_columns}
-        />
-      </Card>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <Card>
-          <div className="border-b border-border p-4">
-            <span className="micro-label">
-              Top 5 Anúncios ({attribution === "meta" ? "Vendas Meta" : "Vendas Cakto"})
-            </span>
-          </div>
-          {topAds.length === 0 ? (
-            <p className="p-6 text-center text-sm text-muted-foreground">
-              Sem vendas atribuídas a anúncios no período.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border">
-              {topAds.map((ad) => (
-                <li
-                  key={ad.adId}
-                  className="flex items-center justify-between gap-3 px-4 py-2.5"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">
-                      {adNames.get(ad.adId) ?? `Anúncio ${ad.adId}`}
-                    </p>
-                    <p className="font-mono text-[0.65rem] text-muted-foreground">
-                      {ad.adId} · {formatNumber(ad.sales)} vendas
-                    </p>
-                  </div>
-                  <span className="sensitive shrink-0 font-mono text-sm font-semibold text-primary tabular">
-                    {formatCurrency(ad.revenue, currency)}
+      {/* Boxes reordenáveis com Grip (6 pontinhos) e layout magnético */}
+      <ReorderableBoxes
+        storageKey="dashia_campanhas_boxes_order"
+        className="grid-cols-1 lg:grid-cols-2 gap-3"
+        items={[
+          {
+            id: "table",
+            className: "lg:col-span-2",
+            children: (
+              <Card>
+                <CampaignsTable
+                  rows={rows}
+                  currency={currency}
+                  canEdit={meta.configured}
+                  columnOrder={
+                    settings?.campaign_columns ?? DEFAULT_SETTINGS.campaign_columns
+                  }
+                  level={level}
+                  selectedCampaigns={selectedCampaignIds}
+                  selectedAdsets={selectedAdsetIds}
+                  selectedAds={selectedAdIds}
+                  isIsolated={isIsolated}
+                />
+              </Card>
+            ),
+          },
+          {
+            id: "top_ads",
+            className: "lg:col-span-1",
+            children: (
+              <Card className="h-full">
+                <div className="border-b border-border p-4">
+                  <span className="micro-label">
+                    Top 5 Anúncios ({attribution === "meta" ? "Vendas Meta" : "Vendas Cakto"})
                   </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-
-        <Card>
-          <div className="border-b border-border p-4">
-            <span className="micro-label">
-              Funil de Vendas
-            </span>
-          </div>
-
-          {totalImpressions === 0 && totalClicks === 0 && totalSales === 0 ? (
-            <p className="p-6 text-center text-sm text-muted-foreground">
-              Sem veiculação nem vendas no período selecionado.
-            </p>
-          ) : (
-            <>
-              <FunnelStep
-                label="Impressões"
-                value={totalImpressions}
-                previous={null}
-                base={totalImpressions}
-              />
-              <FunnelStep
-                label="Cliques"
-                value={totalClicks}
-                previous={totalImpressions}
-                base={totalImpressions}
-              />
-              <FunnelStep
-                label="Visitas à página"
-                value={totalViews}
-                previous={totalClicks}
-                base={totalImpressions}
-              />
-              <FunnelStep
-                label="Finalização de compra iniciada"
-                value={totalCheckouts}
-                previous={totalViews}
-                base={totalImpressions}
-              />
-              <FunnelStep
-                label={
-                  attribution === "meta"
-                    ? "Vendas (relatadas pela Meta)"
-                    : "Vendas e Assinaturas (Cakto)"
-                }
-                value={totalSales}
-                previous={totalCheckouts}
-                base={totalImpressions}
-              />
-
-              <div className="space-y-1.5 px-4 py-3 text-xs text-muted-foreground">
-                <p>
-                  Taxa clique → venda:{" "}
-                  <span className="font-mono tabular text-foreground">
-                    {totalClicks > 0
-                      ? formatPercent((totalSales / totalClicks) * 100, 2)
-                      : "—"}
-                  </span>
-                </p>
-                <p>
-                  Faturamento atribuído:{" "}
-                  <span className="sensitive font-mono tabular text-foreground">
-                    {formatCurrency(totalRevenue, currency)}
-                  </span>
-                  {totalSales > 0 ? (
-                    <>
-                      {" · ticket médio "}
-                      <span className="sensitive font-mono tabular text-foreground">
-                        {formatCurrency(totalRevenue / totalSales, currency)}
-                      </span>
-                    </>
-                  ) : null}
-                </p>
-                {!hasOwnEvents ? (
-                  <p className="pt-1">
-                    Visitas à página e finalizações de compra vêm do pixel,
-                    como a Meta reporta. As vendas vêm do checkout.
+                </div>
+                {topAds.length === 0 ? (
+                  <p className="p-6 text-center text-sm text-muted-foreground">
+                    Sem vendas atribuídas a anúncios no período.
                   </p>
-                ) : null}
-              </div>
-            </>
-          )}
-        </Card>
-      </div>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {topAds.map((ad) => (
+                      <li
+                        key={ad.adId}
+                        className="flex items-center justify-between gap-3 px-4 py-2.5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">
+                            {adNames.get(ad.adId) ?? `Anúncio ${ad.adId}`}
+                          </p>
+                          <p className="font-mono text-[0.65rem] text-muted-foreground">
+                            {ad.adId} · {formatNumber(ad.sales)} vendas
+                          </p>
+                        </div>
+                        <span className="sensitive shrink-0 font-mono text-sm font-semibold text-primary tabular">
+                          {formatCurrency(ad.revenue, currency)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Card>
+            ),
+          },
+          {
+            id: "funnel",
+            className: "lg:col-span-1",
+            children: (
+              <Card className="h-full">
+                <div className="border-b border-border p-4">
+                  <span className="micro-label">Funil de Vendas</span>
+                </div>
+
+                {totalImpressions === 0 && totalClicks === 0 && totalSales === 0 ? (
+                  <p className="p-6 text-center text-sm text-muted-foreground">
+                    Sem veiculação nem vendas no período selecionado.
+                  </p>
+                ) : (
+                  <>
+                    <FunnelStep
+                      label="Impressões"
+                      value={totalImpressions}
+                      previous={null}
+                      base={totalImpressions}
+                    />
+                    <FunnelStep
+                      label="Cliques"
+                      value={totalClicks}
+                      previous={totalImpressions}
+                      base={totalImpressions}
+                    />
+                    <FunnelStep
+                      label="Visitas à página"
+                      value={totalViews}
+                      previous={totalClicks}
+                      base={totalImpressions}
+                    />
+                    <FunnelStep
+                      label="Finalização de compra iniciada"
+                      value={totalCheckouts}
+                      previous={totalViews}
+                      base={totalImpressions}
+                    />
+                    <FunnelStep
+                      label={
+                        attribution === "meta"
+                          ? "Vendas (relatadas pela Meta)"
+                          : "Vendas e Assinaturas (Cakto)"
+                      }
+                      value={totalSales}
+                      previous={totalCheckouts}
+                      base={totalImpressions}
+                    />
+
+                    <div className="space-y-1.5 px-4 py-3 text-xs text-muted-foreground">
+                      <p>
+                        Taxa clique → venda:{" "}
+                        <span className="font-mono tabular text-foreground">
+                          {totalClicks > 0
+                            ? formatPercent((totalSales / totalClicks) * 100, 2)
+                            : "—"}
+                        </span>
+                      </p>
+                      <p>
+                        Faturamento atribuído:{" "}
+                        <span className="sensitive font-mono tabular text-foreground">
+                          {formatCurrency(totalRevenue, currency)}
+                        </span>
+                        {totalSales > 0 ? (
+                          <>
+                            {" · ticket médio "}
+                            <span className="sensitive font-mono tabular text-foreground">
+                              {formatCurrency(totalRevenue / totalSales, currency)}
+                            </span>
+                          </>
+                        ) : null}
+                      </p>
+                      {!hasOwnEvents ? (
+                        <p className="pt-1">
+                          Visitas à página e finalizações de compra vêm do pixel,
+                          como a Meta reporta. As vendas vêm do checkout.
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                )}
+              </Card>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
