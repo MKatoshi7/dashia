@@ -7,6 +7,7 @@ import { getActiveArea, getAreas } from "@/lib/areas";
 import { displayName, getCurrentUser } from "@/lib/auth";
 import { getBranding } from "@/lib/branding";
 import { getRevenueTotal } from "@/lib/metrics";
+import { getTzYmd, startOfDayTz } from "@/lib/period";
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/settings";
 
 /** O painel depende de sessão/cookies — sempre dinâmico. */
@@ -26,9 +27,10 @@ export default async function PanelLayout({
     getActiveArea(),
   ]);
 
-  // A barra de meta é MENSAL — independe do período selecionado no header.
+  // A barra de meta é MENSAL — calculada no fuso de Brasília.
+  const todayYmd = getTzYmd();
+  const monthStart = startOfDayTz(`${todayYmd.slice(0, 7)}-01`);
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
   // Em paralelo: antes eram duas idas ao banco em sequência.
   const [settings, revenue] = activeArea

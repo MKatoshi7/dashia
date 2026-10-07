@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { getActiveArea } from "@/lib/areas";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { getPurchaseMetrics } from "@/lib/metrics";
-import { resolvePeriod } from "@/lib/period";
+import { formatTzDate, resolvePeriod } from "@/lib/period";
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/settings";
 import { createClient } from "@/lib/supabase/server";
 
@@ -91,8 +91,7 @@ export default async function FinanceiroPage({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Financeiro</h2>
         <p className="font-mono text-xs text-muted-foreground">
-          {period.label} · {period.from.toLocaleDateString("pt-BR")} –{" "}
-          {period.to.toLocaleDateString("pt-BR")}
+          {period.label} · {formatTzDate(period.from)} – {formatTzDate(period.to)}
         </p>
       </div>
 

@@ -59,8 +59,10 @@ export type AdAccount = {
   rateError: string | null;
 };
 
+import { getTzYmd } from "@/lib/period";
+
 export function toYmd(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return getTzYmd(date);
 }
 
 /** Normaliza "123" ou "act_123" para "act_123". */

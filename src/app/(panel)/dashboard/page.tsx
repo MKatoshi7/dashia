@@ -23,7 +23,7 @@ import { getActiveArea } from "@/lib/areas";
 import { formatCurrency, formatNumber, formatRoas } from "@/lib/format";
 import { getAreaInsights } from "@/lib/meta/client";
 import { EMPTY_METRICS, getPurchaseMetrics, mergeDailySpend } from "@/lib/metrics";
-import { resolvePeriod } from "@/lib/period";
+import { formatTzDate, resolvePeriod } from "@/lib/period";
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/settings";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -88,8 +88,7 @@ export default async function DashboardPage({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Visão geral</h2>
         <p className="font-mono text-xs text-muted-foreground">
-          {period.label} · {period.from.toLocaleDateString("pt-BR")} –{" "}
-          {period.to.toLocaleDateString("pt-BR")}
+          {period.label} · {formatTzDate(period.from)} – {formatTzDate(period.to)}
         </p>
       </div>
 

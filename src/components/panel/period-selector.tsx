@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 import { Input } from "@/components/ui/input";
 import {
+  getTzYmd,
+  shiftYmd,
   PERIOD_COOKIE,
   PERIOD_OPTIONS,
   PERIOD_PARAMS,
@@ -106,9 +108,9 @@ export function PeriodSelector() {
     apply({ period: key, from: null, to: null });
   }
 
-  // Preenchimento padrão para o formulário de data
-  const todayStr = new Date().toISOString().split("T")[0];
-  const defaultFrom = fromParam || new Date(Date.now() - 6 * 86400000).toISOString().split("T")[0];
+  // Preenchimento padrão para o formulário de data no fuso de Brasília
+  const todayStr = getTzYmd();
+  const defaultFrom = fromParam || shiftYmd(todayStr, -6);
   const defaultTo = toParam || todayStr;
 
   return (

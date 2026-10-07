@@ -5,7 +5,7 @@ import { ReorderableBoxes } from "@/components/panel/reorderable-boxes";
 import { formatCurrency, formatRoas } from "@/lib/format";
 import { getMetaDashboard } from "@/lib/meta/dashboard";
 import { getCheckoutBreakdown } from "@/lib/metrics";
-import type { Period } from "@/lib/period";
+import { formatTzDate, type Period } from "@/lib/period";
 import { metaTax, type Settings } from "@/lib/settings";
 
 import { ApprovalRate, BreakdownList, PanelTitle, StatTile } from "./blocks";
@@ -78,8 +78,7 @@ export async function DashboardV2({
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Visão geral</h2>
         <p className="font-mono text-xs text-muted-foreground">
-          {period.label} · {period.from.toLocaleDateString("pt-BR")} –{" "}
-          {period.to.toLocaleDateString("pt-BR")}
+          {period.label} · {formatTzDate(period.from)} – {formatTzDate(period.to)}
         </p>
       </div>
 

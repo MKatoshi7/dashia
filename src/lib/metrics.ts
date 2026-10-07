@@ -53,19 +53,22 @@ export const EMPTY_METRICS: PurchaseMetrics = {
   recent: [],
 };
 
+import { getTzYmd, shiftYmd } from "@/lib/period";
+
 function toYmd(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return getTzYmd(date);
 }
 
-/** Todos os dias do intervalo, para o gráfico não ter buracos. */
+/** Todos os dias do intervalo no fuso de Brasília, para o gráfico não ter buracos. */
 function daysBetween(from: Date, to: Date): string[] {
+  const startYmd = getTzYmd(from);
+  const endYmd = getTzYmd(to);
   const days: string[] = [];
-  const cursor = new Date(from);
-  cursor.setHours(0, 0, 0, 0);
+  let curr = startYmd;
 
-  while (cursor <= to && days.length < 400) {
-    days.push(toYmd(cursor));
-    cursor.setDate(cursor.getDate() + 1);
+  while (curr <= endYmd && days.length < 400) {
+    days.push(curr);
+    curr = shiftYmd(curr, 1);
   }
   return days;
 }
@@ -128,7 +131,7 @@ export async function getPurchaseMetrics(
         metrics.revenue += value;
         if (primary) metrics.sales += 1;
 
-        const day = row.created_at.slice(0, 10);
+        const day = toYmd(new Date(row.created_at));
         revenueByDay.set(day, (revenueByDay.get(day) ?? 0) + value);
 
         const key = `${row.geo_country ?? "?"}|${row.geo_region ?? "?"}`;
