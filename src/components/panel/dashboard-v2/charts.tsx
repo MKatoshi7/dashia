@@ -228,8 +228,14 @@ export function CumulativeChart({
               dataKey={s.key}
               name={s.name}
               stroke={color(s.token)}
-              strokeWidth={2}
+              strokeWidth={2.5}
               fill={`url(#cum-${s.key})`}
+              activeDot={{
+                r: 5,
+                stroke: "#fff",
+                strokeWidth: 2,
+                fill: color(s.token),
+              }}
             />
           ))}
         </AreaChart>

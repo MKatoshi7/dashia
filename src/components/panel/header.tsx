@@ -21,45 +21,7 @@ type HeaderProps = {
   currency: string;
 };
 
-/**
- * Barra de progresso da meta. Segue o padrão da referência: rótulo micro em
- * mono caixa-alta, valor tabular e trilho fino com preenchimento em gradiente.
- */
-function GoalProgress({
-  revenue,
-  goal,
-  currency,
-}: {
-  revenue: number;
-  goal: number;
-  currency: string;
-}) {
-  const pct = goal > 0 ? Math.min((revenue / goal) * 100, 100) : 0;
-
-  return (
-    <div className="hidden min-w-56 flex-col gap-2 md:flex">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="micro-label">Meta</span>
-        <span className="sensitive font-mono text-[11px] text-muted-foreground">
-          {formatCurrency(revenue, currency)} / {formatCurrency(goal, currency)}
-        </span>
-      </div>
-      <div
-        className="h-1.5 overflow-hidden rounded-full bg-[hsl(var(--foreground)/0.08)]"
-        role="progressbar"
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Progresso da meta de faturamento"
-      >
-        <div
-          className="fill-neon h-full rounded-full transition-[width] duration-500"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
+import { GoalProgress } from "./goal-progress";
 
 export function Header({
   userName,
@@ -99,7 +61,7 @@ export function Header({
           </div>
         </div>
 
-        <GoalProgress revenue={revenue} goal={goal} currency={currency} />
+        <GoalProgress revenue={revenue} initialGoal={goal} currency={currency} />
 
         <div className="flex items-center gap-2">
           <Suspense

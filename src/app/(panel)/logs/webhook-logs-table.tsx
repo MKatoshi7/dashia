@@ -82,6 +82,8 @@ const PLATFORM_LABELS: Record<string, string> = {
   greenn: "Greenn",
 };
 
+import { reprocessWebhookLogs } from "./actions";
+
 export function WebhookLogsTable({
   rows,
   publicToken,
@@ -95,6 +97,8 @@ export function WebhookLogsTable({
   const [selectedLog, setSelectedLog] = useState<WebhookLogRow | null>(null);
   const [copiedJson, setCopiedJson] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isReprocessing, setIsReprocessing] = useState(false);
+  const [reprocessMsg, setReprocessMsg] = useState<string | null>(null);
 
   function handleCopyPayload(payload: unknown) {
     void navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
@@ -106,6 +110,25 @@ export function WebhookLogsTable({
     setIsRefreshing(true);
     router.refresh();
     setTimeout(() => setIsRefreshing(false), 600);
+  }
+
+  async function handleReprocess() {
+    setIsReprocessing(true);
+    setReprocessMsg(null);
+    try {
+      const res = await reprocessWebhookLogs();
+      if (res.ok) {
+        setReprocessMsg(res.message || "Vendas reprocessadas com sucesso!");
+        router.refresh();
+      } else {
+        setReprocessMsg(res.message || "Erro ao reprocessar.");
+      }
+    } catch {
+      setReprocessMsg("Falha ao executar reprocessamento.");
+    } finally {
+      setIsReprocessing(false);
+      setTimeout(() => setReprocessMsg(null), 5000);
+    }
   }
 
   if (rows.length === 0) {
@@ -140,6 +163,37 @@ export function WebhookLogsTable({
 
   return (
     <>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-muted/20 px-4 py-2.5">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleReprocess}
+            disabled={isReprocessing}
+            className="h-8 gap-1.5 px-3 text-xs shadow-xs"
+          >
+            <RefreshCw className={cn("size-3.5", isReprocessing && "animate-spin")} />
+            {isReprocessing ? "Reprocessando vendas..." : "Reprocessar e Importar Vendas"}
+          </Button>
+          {reprocessMsg ? (
+            <span className="font-mono text-xs font-semibold text-emerald-400 animate-in fade-in">
+              {reprocessMsg}
+            </span>
+          ) : null}
+        </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+          className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw className={cn("size-3", isRefreshing && "animate-spin")} />
+          Atualizar Lista
+        </Button>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full min-w-[58rem] text-sm">
           <thead>

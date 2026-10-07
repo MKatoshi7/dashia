@@ -9,6 +9,12 @@ import { timingSafeEqual } from "node:crypto";
 export function get(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc && typeof acc === "object") {
+      if (Array.isArray(acc) && !(key in acc) && !/^\d+$/.test(key)) {
+        const first = acc[0];
+        if (first && typeof first === "object") {
+          return (first as Record<string, unknown>)[key];
+        }
+      }
       return (acc as Record<string, unknown>)[key];
     }
     return undefined;

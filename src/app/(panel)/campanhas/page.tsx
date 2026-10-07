@@ -222,6 +222,13 @@ export default async function CampanhasPage({
     rows = rows.filter((r) => !isRunning(r));
   }
 
+  // Nomes de anúncios da Meta
+  const adNames = new Map(
+    meta.rows
+      .filter((r) => r.level === "ad")
+      .map((r) => [r.id, r.name] as const),
+  );
+
   // Top 5 anúncios: se houver seleção/isolamento ativo, restringe aos criativos do conjunto filtrado
   const activeAdIds = new Set(rows.flatMap((r) => r.adIds));
   const hasHierarchyFilter =
@@ -230,20 +237,54 @@ export default async function CampanhasPage({
     selectedAdIds.length > 0 ||
     isIsolated;
 
-  const topAdsCandidates = hasHierarchyFilter
-    ? [...lastClick.entries()].filter(([adId]) => activeAdIds.has(adId))
-    : [...lastClick.entries()];
+  type TopAdEntry = {
+    adId: string;
+    name: string;
+    sales: number;
+    revenue: number;
+    spend: number;
+  };
 
-  const topAds = topAdsCandidates
-    .map(([adId, row]) => ({ adId, ...row }))
-    .sort((a, b) => b.revenue - a.revenue)
-    .slice(0, 5);
+  let topAds: TopAdEntry[] = [];
 
-  const adNames = new Map(
-    meta.rows
-      .filter((r) => r.level === "ad")
-      .map((r) => [r.id, r.name] as const),
-  );
+  if (attribution === "meta") {
+    const metaAds = meta.rows.filter((r) => r.level === "ad");
+    const candidates = hasHierarchyFilter
+      ? metaAds.filter((r) => activeAdIds.has(r.id))
+      : metaAds;
+
+    topAds = candidates
+      .map((ad) => ({
+        adId: ad.id,
+        name: ad.name,
+        sales: ad.metaPurchases,
+        revenue: ad.metaRevenue,
+        spend: ad.spend,
+      }))
+      .filter((ad) => ad.revenue > 0 || ad.sales > 0 || ad.spend > 0)
+      .sort((a, b) => b.revenue - a.revenue || b.sales - a.sales || b.spend - a.spend)
+      .slice(0, 5);
+  } else {
+    // Atribuição Cakto (Last Click)
+    const candidates = hasHierarchyFilter
+      ? [...lastClick.entries()].filter(([adId]) => activeAdIds.has(adId))
+      : [...lastClick.entries()];
+
+    topAds = candidates
+      .map(([adId, row]) => {
+        const metaAd = meta.rows.find((r) => r.id === adId);
+        return {
+          adId,
+          name: adNames.get(adId) ?? `Anúncio ${adId}`,
+          sales: row.sales,
+          revenue: row.revenue,
+          spend: metaAd?.spend ?? 0,
+        };
+      })
+      .filter((ad) => ad.revenue > 0 || ad.sales > 0)
+      .sort((a, b) => b.revenue - a.revenue || b.sales - a.sales)
+      .slice(0, 5);
+  }
 
   // Totais do funil — TODOS derivados do MESMO conjunto já filtrado.
   const totalImpressions = rows.reduce((sum, r) => sum + r.impressions, 0);
@@ -446,35 +487,62 @@ export default async function CampanhasPage({
             className: "lg:col-span-1",
             children: (
               <Card className="h-full">
-                <div className="border-b border-border p-4">
-                  <span className="micro-label">
+                <div className="flex items-center justify-between border-b border-border p-4">
+                  <span className="micro-label font-semibold">
                     Top 5 Anúncios ({attribution === "meta" ? "Vendas Meta" : "Vendas Cakto"})
+                  </span>
+                  <span className="font-mono text-[0.65rem] text-muted-foreground">
+                    Por Faturamento
                   </span>
                 </div>
                 {topAds.length === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">
-                    Sem vendas atribuídas a anúncios no período.
-                  </p>
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    <p className="font-medium text-foreground/80">Sem anúncios com faturamento</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      As vendas atribuídas aos anúncios aparecerão ranqueadas aqui.
+                    </p>
+                  </div>
                 ) : (
                   <ul className="divide-y divide-border">
-                    {topAds.map((ad) => (
-                      <li
-                        key={ad.adId}
-                        className="flex items-center justify-between gap-3 px-4 py-2.5"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {adNames.get(ad.adId) ?? `Anúncio ${ad.adId}`}
-                          </p>
-                          <p className="font-mono text-[0.65rem] text-muted-foreground">
-                            {ad.adId} · {formatNumber(ad.sales)} vendas
-                          </p>
-                        </div>
-                        <span className="sensitive shrink-0 font-mono text-sm font-semibold text-primary tabular">
-                          {formatCurrency(ad.revenue, currency)}
-                        </span>
-                      </li>
-                    ))}
+                    {(() => {
+                      const maxAdRev = Math.max(...topAds.map((a) => a.revenue), 1);
+                      return topAds.map((ad, idx) => {
+                        const pct = Math.max((ad.revenue / maxAdRev) * 100, 3);
+                        const roasVal = ad.spend > 0 ? ad.revenue / ad.spend : 0;
+                        return (
+                          <li
+                            key={ad.adId}
+                            className="space-y-1.5 px-4 py-3 transition-colors hover:bg-muted/20"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="min-w-0 flex items-center gap-2">
+                                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 font-mono text-[0.65rem] font-bold text-primary">
+                                  {idx + 1}
+                                </span>
+                                <div className="min-w-0">
+                                  <p className="truncate text-xs font-semibold text-foreground">
+                                    {ad.name}
+                                  </p>
+                                  <p className="font-mono text-[0.65rem] text-muted-foreground">
+                                    {ad.adId} · {formatNumber(ad.sales)} vendas
+                                    {roasVal > 0 ? ` · ROAS ${roasVal.toFixed(2)}x` : ""}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="sensitive shrink-0 font-mono text-xs font-bold text-primary tabular">
+                                {formatCurrency(ad.revenue, currency)}
+                              </span>
+                            </div>
+                            <div className="h-1.5 overflow-hidden rounded-full bg-muted/60">
+                              <div
+                                className="fill-neon h-full rounded-full transition-all duration-500"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                          </li>
+                        );
+                      });
+                    })()}
                   </ul>
                 )}
               </Card>
@@ -485,83 +553,79 @@ export default async function CampanhasPage({
             className: "lg:col-span-1",
             children: (
               <Card className="h-full">
-                <div className="border-b border-border p-4">
-                  <span className="micro-label">Funil de Vendas</span>
+                <div className="flex items-center justify-between border-b border-border p-4">
+                  <span className="micro-label font-semibold">Funil de Vendas</span>
+                  <span className="font-mono text-[0.65rem] text-muted-foreground">
+                    Conversão Etapa a Etapa
+                  </span>
                 </div>
 
-                {totalImpressions === 0 && totalClicks === 0 && totalSales === 0 ? (
-                  <p className="p-6 text-center text-sm text-muted-foreground">
-                    Sem veiculação nem vendas no período selecionado.
-                  </p>
-                ) : (
-                  <>
-                    <FunnelStep
-                      label="Impressões"
-                      value={totalImpressions}
-                      previous={null}
-                      base={totalImpressions}
-                    />
-                    <FunnelStep
-                      label="Cliques"
-                      value={totalClicks}
-                      previous={totalImpressions}
-                      base={totalImpressions}
-                    />
-                    <FunnelStep
-                      label="Visitas à página"
-                      value={totalViews}
-                      previous={totalClicks}
-                      base={totalImpressions}
-                    />
-                    <FunnelStep
-                      label="Finalização de compra iniciada"
-                      value={totalCheckouts}
-                      previous={totalViews}
-                      base={totalImpressions}
-                    />
-                    <FunnelStep
-                      label={
-                        attribution === "meta"
-                          ? "Vendas (relatadas pela Meta)"
-                          : "Vendas e Assinaturas (Cakto)"
-                      }
-                      value={totalSales}
-                      previous={totalCheckouts}
-                      base={totalImpressions}
-                    />
+                <div className="divide-y divide-border/60">
+                  <FunnelStep
+                    label="Impressões"
+                    value={totalImpressions}
+                    previous={null}
+                    base={totalImpressions}
+                  />
+                  <FunnelStep
+                    label="Cliques"
+                    value={totalClicks}
+                    previous={totalImpressions}
+                    base={totalImpressions}
+                  />
+                  <FunnelStep
+                    label="Visitas à página"
+                    value={totalViews}
+                    previous={totalClicks}
+                    base={totalImpressions}
+                  />
+                  <FunnelStep
+                    label="Finalização de compra iniciada"
+                    value={totalCheckouts}
+                    previous={totalViews}
+                    base={totalImpressions}
+                  />
+                  <FunnelStep
+                    label={
+                      attribution === "meta"
+                        ? "Vendas (relatadas pela Meta)"
+                        : "Vendas e Assinaturas (Cakto)"
+                    }
+                    value={totalSales}
+                    previous={totalCheckouts}
+                    base={totalImpressions}
+                  />
 
-                    <div className="space-y-1.5 px-4 py-3 text-xs text-muted-foreground">
-                      <p>
-                        Taxa clique → venda:{" "}
-                        <span className="font-mono tabular text-foreground">
-                          {totalClicks > 0
-                            ? formatPercent((totalSales / totalClicks) * 100, 2)
-                            : "—"}
-                        </span>
-                      </p>
-                      <p>
-                        Faturamento atribuído:{" "}
-                        <span className="sensitive font-mono tabular text-foreground">
-                          {formatCurrency(totalRevenue, currency)}
-                        </span>
-                        {totalSales > 0 ? (
-                          <>
-                            {" · ticket médio "}
-                            <span className="sensitive font-mono tabular text-foreground">
-                              {formatCurrency(totalRevenue / totalSales, currency)}
-                            </span>
-                          </>
-                        ) : null}
-                      </p>
-                      {!hasOwnEvents ? (
-                        <p className="pt-1">
-                          Visitas à página e finalizações de compra vêm do pixel,
-                          como a Meta reporta. As vendas vêm do checkout.
-                        </p>
+                  <div className="space-y-1.5 px-4 py-3 text-xs text-muted-foreground bg-muted/10">
+                    <p>
+                      Taxa clique → venda:{" "}
+                      <span className="font-mono tabular text-foreground font-medium">
+                        {totalClicks > 0
+                          ? formatPercent((totalSales / totalClicks) * 100, 2)
+                          : "0,00%"}
+                      </span>
+                    </p>
+                    <p>
+                      Faturamento atribuído:{" "}
+                      <span className="sensitive font-mono tabular text-foreground font-medium">
+                        {formatCurrency(totalRevenue, currency)}
+                      </span>
+                      {totalSales > 0 ? (
+                        <>
+                          {" · ticket médio "}
+                          <span className="sensitive font-mono tabular text-foreground">
+                            {formatCurrency(totalRevenue / totalSales, currency)}
+                          </span>
+                        </>
                       ) : null}
-                    </div>
-                  </>
-                )}
+                    </p>
+                    {!hasOwnEvents ? (
+                      <p className="pt-0.5 text-[0.7rem]">
+                        Visitas e finalizações vêm do pixel Meta; vendas vêm do checkout.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
               </Card>
             ),
           },

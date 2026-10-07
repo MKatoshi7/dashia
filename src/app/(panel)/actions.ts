@@ -182,3 +182,29 @@ export async function deleteArea(
   revalidatePath("/", "layout");
   return {};
 }
+
+/** Atualiza a meta de faturamento mensal da área ativa */
+export async function updateRevenueGoal(
+  newGoal: number,
+): Promise<{ ok: boolean; error?: string }> {
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, error: "Não autenticado." };
+
+  const { getActiveArea } = await import("@/lib/areas");
+  const area = await getActiveArea();
+  if (!area) return { ok: false, error: "Nenhuma área selecionada." };
+
+  if (typeof newGoal !== "number" || isNaN(newGoal) || newGoal < 0) {
+    return { ok: false, error: "Valor de meta inválido." };
+  }
+
+  const admin = createAdminClient();
+  await Promise.all([
+    admin.from("settings").update({ revenue_goal: newGoal }).eq("area_id", area.id),
+    admin.from("areas").update({ revenue_goal: newGoal }).eq("id", area.id),
+  ]);
+
+  await audit(area.id, user.email, "settings.revenue_goal", { revenue_goal: newGoal });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
